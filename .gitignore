@@ -2,3 +2,7 @@
 .DS_Store
 *.log
 .jj-lab/
+
+# Local skill-edit history; machine state, not methodology.
+.skill_edit_log.jsonl
+.skill_snapshots/
