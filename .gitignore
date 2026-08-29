@@ -1,0 +1,4 @@
+# Scratch output never belongs in the repository (see maintaining-vcs-hygiene §1).
+.DS_Store
+*.log
+.jj-lab/

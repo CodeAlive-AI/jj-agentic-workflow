@@ -92,6 +92,7 @@ Every rule in this workflow traces to one of those measured hazards or to a real
 | `hooks/` | Claude Code hooks (world-watch, session-end); adapt for other hosts |
 | `tests/multi-writer-hazards.sh` | 23 checks proving the hazards and the guards, on a scratch repo |
 | `docs/DESIGN.md` | Design rationale and honest trade-offs |
+| `CONTRIBUTING.md` | What a new rule needs before it earns a place |
 
 ## Compatibility
 
@@ -101,3 +102,13 @@ instead of lingering forever.
 
 Skills use the open `SKILL.md` format (Claude Code, Codex, OpenCode and others read it).
 The hooks are Claude Code-specific; the mechanisms and config are host-agnostic.
+
+## Contributing
+
+Rules here are earned, not invented — a new one needs a reproduction and a named layer.
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+MIT — see [LICENSE](LICENSE). Built at [CodeAlive](https://codealive.ai) out of the jj
+programme that runs our own multi-agent development.
