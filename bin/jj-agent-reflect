@@ -1,0 +1,112 @@
+#!/usr/bin/env python3
+"""Summarise guardrail events so reflection argues from counts, not memory.
+
+Deterministic on purpose: counting is not a job for a model. The output is
+evidence; deciding which layer to change is the reflecting agent's job.
+
+Usage: jj-agent-reflect [--days N] [--instructions PATH ...]
+"""
+import argparse, collections, datetime as dt, json, os, sys
+
+STATE = os.environ.get("JJ_AGENT_STATE") or os.path.join(
+    os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state")), "jj-agent")
+LOG = os.path.join(STATE, "events.jsonl")
+BOUNCE_WINDOW_MIN = 30
+
+
+def load(days):
+    cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
+    out = []
+    try:
+        fh = open(LOG)
+    except OSError:
+        return out
+    with fh:
+        for line in fh:
+            try:
+                e = json.loads(line)
+                e["_t"] = dt.datetime.strptime(e["ts"], "%Y-%m-%dT%H:%M:%SZ").replace(
+                    tzinfo=dt.timezone.utc)
+            except Exception:
+                continue
+            if e["_t"] >= cutoff:
+                out.append(e)
+    return out
+
+
+def approx_tokens(path):
+    try:
+        body = open(path).read()
+    except OSError:
+        return None
+    if body.startswith("---"):                     # drop YAML frontmatter
+        body = body.split("---", 2)[-1]
+    return int(len(body) / 4.2)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--days", type=int, default=30)
+    ap.add_argument("--instructions", action="append", default=[])
+    a = ap.parse_args()
+
+    ev = load(a.days)
+    print(f"guardrail reflection — last {a.days} days, {len(ev)} event(s), log {LOG}")
+    if not ev:
+        print("\nNo events recorded. Either nothing fired, or the guards are not "
+              "instrumented in this environment — check that before concluding all is well.")
+        return 0
+
+    span = f"{min(e['_t'] for e in ev):%Y-%m-%d} .. {max(e['_t'] for e in ev):%Y-%m-%d}"
+    print(f"window with data: {span}\n")
+
+    by = collections.Counter((e["event"], e.get("rule", "")) for e in ev)
+    last = {}
+    for e in ev:
+        last[(e["event"], e.get("rule", ""))] = e["_t"]
+    print("observed, most frequent first:")
+    for (event, rule), n in by.most_common():
+        label = f"{event}/{rule}" if rule else event
+        print(f"  {n:4}  {label:<52} last {last[(event, rule)]:%Y-%m-%d}")
+
+    # Repeated identical refusals in one repo shortly apart: the rule held, but the
+    # agent could not act on it. That indicts the message, not the rule.
+    seq = collections.defaultdict(list)
+    for e in sorted(ev, key=lambda x: x["_t"]):
+        if e["event"].endswith("refused") or e["event"].endswith("blocked"):
+            seq[(e.get("repo", "?"), e.get("rule", ""))].append(e["_t"])
+    bounces = []
+    for (repo, rule), times in seq.items():
+        run = 1
+        for prev, cur in zip(times, times[1:]):
+            if (cur - prev).total_seconds() <= BOUNCE_WINDOW_MIN * 60:
+                run += 1
+                if run >= 3:
+                    bounces.append((repo, rule, run, cur))
+            else:
+                run = 1
+    print("\nrepeat bounces (same guard, same repo, "
+          f"{BOUNCE_WINDOW_MIN} min apart) — suspect the hint, not the rule:")
+    if bounces:
+        seen = {}
+        for repo, rule, run, when in bounces:
+            seen[(repo, rule)] = max(seen.get((repo, rule), (0, when))[0], run), when
+        for (repo, rule), (run, when) in seen.items():
+            print(f"  {rule} x{run} in {repo} around {when:%Y-%m-%d %H:%M}")
+    else:
+        print("  none")
+
+    for path in a.instructions:
+        t = approx_tokens(path)
+        if t is None:
+            print(f"\ninstruction budget: {path} — unreadable")
+        else:
+            flag = "OVER" if t > 2000 else "ok"
+            print(f"\ninstruction budget: {os.path.basename(path)} ~{t} tokens inline "
+                  f"(target 2000) — {flag}")
+    print("\nNot answered here, and the point of the exercise: for each rule above, "
+          "which layer should have caught it — mechanism, hint, instruction, or nothing yet?")
+    return 0
+
+
+sys.exit(main())

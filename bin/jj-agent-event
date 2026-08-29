@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Append one guardrail event to the local event log. Never fails the caller.
+#
+# Usage: jj-agent-event <event-name> [key=value ...]
+#
+# Log only rule names, ids, and counts — never file contents, descriptions,
+# credentials, or anything a secret could ride in on. The log is local, is
+# never pushed, and exists so that reflection can ask "which rule fired, how
+# often, and did the agent recover" instead of guessing from transcripts.
+set -u
+{
+  state="${JJ_AGENT_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/jj-agent}"
+  mkdir -p "$state" 2>/dev/null || exit 0
+  log="$state/events.jsonl"
+
+  event="${1:-unknown}"; shift 2>/dev/null || true
+  esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/	/ /g'; }
+
+  line="{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"event\":\"$(esc "$event")\""
+  for kv in "$@"; do
+    k="${kv%%=*}"; v="${kv#*=}"
+    [ "$k" = "$kv" ] && continue
+    line="$line,\"$(esc "$k")\":\"$(esc "$v")\""
+  done
+  printf '%s}\n' "$line" >> "$log" 2>/dev/null
+
+  # Keep the log bounded; reflection only ever needs recent history.
+  lines=$(wc -l < "$log" 2>/dev/null | tr -d ' ')
+  if [ "${lines:-0}" -gt 5000 ]; then
+    tail -n 2500 "$log" > "$log.tmp" 2>/dev/null && mv "$log.tmp" "$log" 2>/dev/null
+  fi
+} 2>/dev/null
+exit 0

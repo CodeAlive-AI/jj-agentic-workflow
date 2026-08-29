@@ -1,0 +1,17 @@
+# Merge into ~/.config/jj/config.toml. Every entry here is a mechanism backing
+# a rule in skills/ — install the mechanism first, then the skill.
+
+[git]
+# A deleted or pruned Git ref must never silently delete work. With the default
+# (true), deleting a ref abandons the commit and rebases descendants so that the
+# abandoned commit's file content disappears from the descendant's tree.
+abandon-unreachable-commits = false
+
+# Refuse to publish commits (and their descendants) explicitly marked unfinished.
+# A backstop, not the primary gate: `jj land` still owns trunk moves.
+private-commits = 'description(glob:"wip:*") | description(glob:"WIP:*") | description(glob:"private:*") | description(glob:"scratch:*")'
+
+[aliases]
+park = ["util", "exec", "--", "bash", "-c", "set -e; name=\"${1:-}\"; case \"$name\" in \"\"|-*) echo \"usage: jj park <name> [<rev>]   (name first, then optional revision; flags are not accepted)\" >&2; exit 2;; esac; rev=\"${2:-}\"; case \"$rev\" in -*) echo \"jj park: '$rev' looks like a flag; pass a revision\" >&2; exit 2;; esac; if [ -z \"$rev\" ]; then if [ -n \"$(jj log --ignore-working-copy -r '@ & (~empty() | description(regex:\".\"))' --no-graph -T commit_id 2>/dev/null)\" ]; then rev=@; else rev=@-; fi; fi; jj bookmark set \"parked/$name\" -r \"$rev\"; jj log --ignore-working-copy -r \"parked/$name\" --no-graph -T 'commit_id.short() ++ \" parked/'\"$name\"'\n\"'", ""]
+land = ["util", "exec", "--", "bash", "-c", "exec ~/.local/bin/jj-land \"$@\"", ""]
+orphans = ["log", "-r", "heads(all() & ~::bookmarks() & ~::remote_bookmarks() & ~empty())", "--no-graph", "-T", "commit_id.short() ++ \" \" ++ author.timestamp().format(\"%Y-%m-%d\") ++ \" \" ++ description.first_line() ++ \"\\n\""]

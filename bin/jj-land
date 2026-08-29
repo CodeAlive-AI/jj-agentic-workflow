@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# jj land [<rev>] [--to <bookmark>] — forward-only trunk move with publication safety.
+#
+# Refuses when:
+#   * the trunk bookmark is CONFLICTED (its name is then an ambiguous revset — no
+#     ancestry statement about it means anything until reconciled);
+#   * the move would be sideways (orphaning the old line);
+#   * the target does not contain what is already published on the remote
+#     (landing a line that drops published work is how local and origin diverge);
+#   * the target or its unlanded ancestors contain conflicts.
+set -euo pipefail
+ev(){ "$HOME/.local/bin/jj-agent-event" "$@" "repo=$(basename "$(jj workspace root 2>/dev/null || pwd)")" >/dev/null 2>&1 || true; }
+
+rev="@-"; bookmark=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --to) bookmark="$2"; shift 2 ;;
+        -*) echo "jj land: unknown flag '$1'" >&2; exit 2 ;;
+        *) rev="$1"; shift ;;
+    esac
+done
+
+count_rev() { jj log --ignore-working-copy -r "$1" --no-graph -T 'commit_id ++ "\n"' 2>/dev/null | grep -c . || true; }
+one_rev()   { jj log --ignore-working-copy -r "$1" --no-graph -T 'commit_id' 2>/dev/null | head -1; }
+
+if [[ -z "$bookmark" ]]; then
+    for cand in main master trunk; do
+        [[ $(count_rev "bookmarks(exact:\"$cand\")") -gt 0 ]] && { bookmark="$cand"; break; }
+    done
+fi
+[[ -z "$bookmark" ]] && { echo "jj land: no main/master/trunk bookmark found; pass --to <bookmark>" >&2; exit 1; }
+
+# --- Guard 0: conflicted bookmark ------------------------------------------
+n=$(count_rev "bookmarks(exact:\"$bookmark\")")
+if [[ "$n" -gt 1 ]]; then
+    ev land-refused rule=conflicted-bookmark
+    echo "jj land: REFUSED — bookmark '$bookmark' is CONFLICTED; it points at $n revisions:" >&2
+    jj log --ignore-working-copy -r "bookmarks(exact:\"$bookmark\")" --no-graph \
+        -T '"  " ++ commit_id.short() ++ " " ++ description.first_line() ++ "\n"' >&2
+    echo "While conflicted, '$bookmark' is an ambiguous revset: no ancestry claim about it is" >&2
+    echo "meaningful. Reconcile first — rebase the unpublished side onto the published one:" >&2
+    echo "  jj rebase -s 'roots(bookmarks(exact:\"$bookmark\") & ~::${bookmark}@origin)' -d ${bookmark}@origin" >&2
+    echo "  jj land <new-tip>" >&2
+    exit 1
+fi
+
+target=$(one_rev "$rev"); old=$(one_rev "$bookmark")
+[[ -z "$target" ]] && { echo "jj land: revision '$rev' does not resolve" >&2; exit 1; }
+
+report_hanging() {
+    local hanging
+    hanging=$(jj log --ignore-working-copy \
+        -r 'heads(all() & ~::bookmarks() & ~::remote_bookmarks() & ~empty())' \
+        --no-graph -T 'commit_id.short() ++ " " ++ author.timestamp().format("%Y-%m-%d") ++ " " ++ description.first_line() ++ "\n"' 2>/dev/null)
+    if [[ -n "$hanging" ]]; then
+        echo ""
+        echo "jj land: still hanging outside any bookmark (integrate, 'jj park <name>', or report to the user):"
+        echo "$hanging"
+    fi
+}
+
+# --- Guard 1: never drop published work ------------------------------------
+remote=$(one_rev "${bookmark}@origin" || true)
+if [[ -n "$remote" && "$remote" != "$target" ]]; then
+    if [[ -z "$(jj log --ignore-working-copy -r "::$target & $remote" --no-graph -T 'commit_id' 2>/dev/null)" ]]; then
+        ev land-refused rule=target-missing-published-work
+        echo "jj land: REFUSED — target ${target:0:12} does not contain published ${bookmark}@origin (${remote:0:12})." >&2
+        echo "Landing it would diverge local '$bookmark' from the remote and drop published work:" >&2
+        jj log --ignore-working-copy -r "::$remote & ~::$target & ~empty()" --no-graph \
+            -T '"  " ++ commit_id.short() ++ " " ++ description.first_line() ++ "\n"' 2>/dev/null | head -10 >&2
+        echo "Rebase your line onto the published head first:" >&2
+        echo "  jj git fetch --remote origin" >&2
+        echo "  jj rebase -s 'roots(::$target & ~::${bookmark}@origin)' -d ${bookmark}@origin" >&2
+        exit 1
+    fi
+fi
+
+if [[ "$target" == "$old" ]]; then
+    ev land-noop
+    echo "jj land: $bookmark already at ${target:0:12}."
+    report_hanging
+    exit 0
+fi
+
+# --- Guard 2: forward-only --------------------------------------------------
+if [[ -z "$(jj log --ignore-working-copy -r "::$target & $old" --no-graph -T 'commit_id' 2>/dev/null)" ]]; then
+    ev land-refused rule=sideways-or-backwards-move
+    echo "jj land: REFUSED — $bookmark (${old:0:12}) is NOT an ancestor of target ${target:0:12}." >&2
+    echo "A sideways move would orphan every commit only the old line reaches:" >&2
+    jj log --ignore-working-copy -r "::$bookmark & ~::$target & ~empty()" --no-graph \
+        -T '"  " ++ commit_id.short() ++ " " ++ description.first_line() ++ "\n"' 2>/dev/null | head -15 >&2
+    echo "Rebase first, then land:" >&2
+    echo "  jj rebase -s 'roots(::$target & ~::$bookmark)' -d $bookmark" >&2
+    echo "Conflicts are recoverable; orphaned lines get lost." >&2
+    exit 1
+fi
+
+# --- Guard 3: no conflicted commits ----------------------------------------
+if [[ -n "$(jj log --ignore-working-copy -r "($old..$target | $rev) & conflicts()" --no-graph -T 'commit_id' 2>/dev/null)" ]]; then
+    ev land-refused rule=conflicted-commits
+    echo "jj land: REFUSED — the target or its unlanded ancestors contain conflicts. Resolve first." >&2
+    exit 1
+fi
+
+jj bookmark set "$bookmark" -r "$target"
+n_landed=$(jj log --ignore-working-copy -r "$old..$target" --no-graph -T '"x"' 2>/dev/null | wc -c | tr -d ' ')
+ev land-succeeded "commits=$n_landed"
+echo "jj land: $bookmark ${old:0:12} -> ${target:0:12} (fast-forward, $n_landed commit(s))."
+jj status
+report_hanging
