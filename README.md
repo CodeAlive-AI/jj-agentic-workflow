@@ -110,5 +110,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Built at [CodeAlive](https://codealive.ai) out of the jj
-programme that runs our own multi-agent development.
+MIT — see [LICENSE](LICENSE).
