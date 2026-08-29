@@ -25,7 +25,10 @@ overwriting anything that already exists; never merge silently.
 ## 2. Hooks (Claude Code only)
 
 Copy `hooks/*.py` to `~/.claude/hooks/` and register them in `~/.claude/settings.json`:
-`jj-world-watch.py` on PostToolUse, `jj-session-end-check.py` on Stop. Both fail open.
+`jj-abandon-guard.py` on PreToolUse (matcher `Bash`), `jj-world-watch.py` on PostToolUse
+(matcher `Bash`), `jj-session-end-check.py` on Stop. All three fail open. The abandon guard
+is the only blocking one: it exists because `jj abandon` deletes bookmarks and cannot be
+wrapped by a jj alias, so on a host without hooks that rule stays prose.
 
 ## 3. Skills
 

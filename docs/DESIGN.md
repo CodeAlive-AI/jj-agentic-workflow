@@ -42,6 +42,16 @@ We ban them in prose instead of wrapping, because jj does not record which works
 an operation — the wrapper could not distinguish "safe to rewind" reliably, and a guard
 that sometimes lies is worse than a rule. Forward recovery is always available.
 
+## Trade-off: the abandon guard lives in the host, not in jj
+
+`jj abandon` deletes any bookmark pointing at the commit it removes, which makes it the one
+command that can move trunk without passing `jj land`. It cannot be wrapped where the other
+guards live: jj refuses aliases that shadow built-in commands. So the guard sits one layer
+out, as a PreToolUse hook on the agent host — which buys real enforcement on Claude Code and
+none at all on a host without hooks, or for a human typing the command directly. We took the
+partial mechanism over pure prose because the failure it prevents is unrecoverable-looking
+(trunk gone, descendants rebased) and, in our own logs, recurrent.
+
 ## Trade-off: event log is local and unauthenticated
 
 `jj-agent-event` appends plain JSONL with no signing and logs only rule names, ids and

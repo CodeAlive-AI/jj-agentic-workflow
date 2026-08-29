@@ -117,5 +117,38 @@ grep -q '"rule":"sideways-or-backwards-move"' "$EVLOG" 2>/dev/null && ok "a refu
 python3 -c "import json,sys; [json.loads(l) for l in open('$EVLOG')]" 2>/dev/null && ok "event log is valid JSONL" || bad "event log is malformed"
 unset JJ_AGENT_STATE
 
+say "8. jj abandon is the back door around the trunk guard"
+R=$(mk abandon-bookmark)
+( cd "$R"; jj new main -m "landed work"; echo w > w.txt; jj status; jj land @; jj new -m next ) >/dev/null 2>&1
+MAIN=$(jj -R "$R" --ignore-working-copy log -r main --no-graph -T commit_id)
+OUT=$( cd "$R"; jj abandon "commit_id(\"$MAIN\")" 2>&1 )
+case "$(jj -R "$R" --ignore-working-copy log -r 'bookmarks(exact:"main")' --no-graph -T commit_id 2>/dev/null)" in
+  "") ok "abandon DELETED the bookmark it pointed at (rule is necessary)" ;;
+  *)  bad "main survived the abandon — re-check the rule: $OUT" ;;
+esac
+R=$(mk abandon-retain)
+( cd "$R"; jj new main -m "landed work"; echo w > w.txt; jj status; jj land @; jj new -m next ) >/dev/null 2>&1
+MAIN=$(jj -R "$R" --ignore-working-copy log -r main --no-graph -T commit_id)
+PARENT=$(jj -R "$R" --ignore-working-copy log -r "commit_id(\"$MAIN\")-" --no-graph -T commit_id)
+( cd "$R"; jj abandon "commit_id(\"$MAIN\")" --retain-bookmarks ) >/dev/null 2>&1
+NOW=$(jj -R "$R" --ignore-working-copy log -r 'bookmarks(exact:"main")' --no-graph -T commit_id 2>/dev/null)
+[ "$NOW" = "$PARENT" ] && ok "--retain-bookmarks still moves trunk BACKWARDS (jj land would refuse it)" \
+                       || bad "unexpected --retain-bookmarks result: '$NOW'"
+OUT=$( cd "$R"; jj config set --repo aliases.abandon '["status"]' 2>&1; jj abandon --help 2>&1 | head -2 )
+case "$OUT" in *"Cannot define an alias that overrides"*) ok "abandon cannot be wrapped by an alias (guard must sit in the host)" ;;
+  *) bad "an alias now shadows abandon — the wrapper layer may be available: $OUT" ;; esac
+
+GUARD="$(cd "$(dirname "$0")/../hooks" && pwd)/jj-abandon-guard.py"
+R=$(mk abandon-guard)
+( cd "$R"; jj new main -m "landed work"; echo w > w.txt; jj status; jj land @; jj new -m "my wip"; echo m > m.txt; jj status ) >/dev/null 2>&1
+MAIN=$(jj -R "$R" --ignore-working-copy log -r main --no-graph -T commit_id)
+BASE=$(jj -R "$R" --ignore-working-copy log -r 'description(substring:"base")' --no-graph -T commit_id)
+guard() { python3 -c 'import json,sys; print(json.dumps({"tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$R" "$1" | python3 "$GUARD" >/dev/null 2>&1; echo $?; }
+[ "$(guard 'jj abandon @')" = 0 ] && ok "guard allows abandoning your own unlanded change" || bad "guard blocked a legitimate abandon"
+[ "$(guard 'jj abandon $old')" = 2 ] && ok "guard refuses a target from a shell substitution" || bad "guard allowed a stale-variable target"
+[ "$(guard "jj abandon 'commit_id(\"$MAIN\")'")" = 2 ] && ok "guard refuses abandoning a bookmarked commit" || bad "guard allowed deleting a bookmark"
+[ "$(guard "jj abandon 'commit_id(\"$BASE\")'")" = 2 ] && ok "guard refuses abandoning landed history" || bad "guard allowed rewriting landed history"
+[ "$(guard 'echo abandon ship')" = 0 ] && ok "guard ignores commands that merely mention abandon" || bad "guard fired on unrelated text"
+
 printf '\n\033[1mtotal: %d passed, %d failed\033[0m\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

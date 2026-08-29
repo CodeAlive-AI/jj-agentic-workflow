@@ -89,7 +89,7 @@ Every rule in this workflow traces to one of those measured hazards or to a real
 | `skills/maintaining-vcs-hygiene/` | VCS culture skill + the reflection procedure |
 | `bin/` | `jj-land`, `jj-agent-event`, `jj-agent-reflect` |
 | `config/jj-config-snippet.toml` | `[git]` safety settings and the `park`/`land`/`orphans` aliases |
-| `hooks/` | Claude Code hooks (world-watch, session-end); adapt for other hosts |
+| `hooks/` | Claude Code hooks (abandon guard, world-watch, session-end); adapt for other hosts |
 | `tests/multi-writer-hazards.sh` | 23 checks proving the hazards and the guards, on a scratch repo |
 | `docs/DESIGN.md` | Design rationale and honest trade-offs |
 | `CONTRIBUTING.md` | What a new rule needs before it earns a place |

@@ -26,6 +26,12 @@ description: Use Jujutsu safely in any jj-enabled repository. Use when changing 
   bookmark for every other writer). Before `jj git push`, verify with
   `jj log -r 'main & ~::<push-tip>'` — empty output or stop.
 - Land trunk with `jj land [<rev>]`, never raw `jj bookmark set main`: it enforces forward-only moves (a sideways move orphans the old line) and refuses conflicted stacks. If it refuses, run the rebase it prints and accept the conflicts — conflicts are recoverable, orphaned lines get lost. `jj orphans` lists unreachable non-empty heads; run it when finishing multi-writer work.
+- `jj abandon` is the back door around every trunk guard: jj **deletes** bookmarks pointing at
+  an abandoned commit and rebases its descendants, so one command removes trunk and rewrites
+  landed history while reporting it like any success. Abandon only your own unlanded change,
+  and give it a full commit id you resolved and read in the same breath — never `@`, `@-` or a
+  revision captured earlier, because a revision resolves when the command runs and a shared
+  `@` moves between your commands.
 - Where more than one workspace exists, never rewind operations — `jj undo`, `jj redo` and
   `jj op restore` all restore the *repository-wide* view and silently revert concurrent writers
   (measured: `undo` left the caller's own mistake in place and reverted a co-worker's change;

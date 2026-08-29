@@ -35,6 +35,46 @@ The same reasoning forbids mutating commands under `--at-op`: they deliberately 
 log, and a fork that is later reconciled can drop bookmarks and commits out of the visible graph.
 `--at-op` is an inspection flag.
 
+## A revision resolves when the command runs, not when you decided on it
+
+Two agents shared one working copy. Agent A captured a revision, agent B landed a commit and
+moved `@`, and A's next command — `jj abandon $old` — hit B's landed commit. The variable was
+honest when it was assigned and wrong when it was used. This is the ordinary shape of the
+mistake: an agent thinks in revisions (`@`, `@-`, "the commit I just made"), but jj resolves the
+expression at execution time, and in a shared copy the interval between two of your commands is
+long enough for someone else to write.
+
+`jj abandon` turns that into trunk damage, because it is the one command that moves a bookmark
+without any of `jj land`'s guards. Reproduced on 0.44.0 — abandoning a commit that `main` points
+at:
+
+```
+Abandoned 1 commits:
+  ykontsyl 15ab10bd main | landed work
+Deleted bookmarks: main            <- trunk is gone, not moved back
+Rebased 1 descendant commits onto parents of abandoned commits.
+```
+
+The bookmark is **deleted**, not moved; `--retain-bookmarks` keeps it but moves it to the parent,
+which is the backwards move `jj land` refuses. Either way the trunk guard is bypassed by a
+command nobody thought of as a trunk command, and jj reports it in the same tone as a success.
+
+Two consequences, in this order:
+
+1. For any destructive command (`abandon`, `restore`, `squash`, `rebase -s`), resolve the target
+   and read it in the same breath, then pass the full commit id:
+   `jj --ignore-working-copy log -r <expr> --no-graph -T 'commit_id ++ " " ++ bookmarks ++ " " ++ description.first_line()'`.
+   A target that arrives from a shell variable is a target nobody re-checked.
+2. Never abandon a commit that carries a bookmark or that a bookmark already reaches. That is
+   landed history, and in a shared repository it is usually not yours.
+
+`jj abandon` cannot be wrapped — jj refuses aliases that shadow built-in commands
+(`Cannot define an alias that overrides the built-in command 'abandon'`) — so the mechanism sits
+one layer out, in the agent host: `hooks/jj-abandon-guard.py` refuses these three shapes on
+PreToolUse and prints the resolve-then-abandon commands. Recovery, if it already happened, is
+forward as always: `jj bookmark set <name> -r 'commit_id("<full id>")'` back onto the same commit,
+then rebase your own change onto it. Never `jj undo` — it would take the other writer with it.
+
 ## Reads snapshot the working copy
 
 `status`, `log`, `diff`, `op log` all snapshot first. Measured on a repo with one stray file
