@@ -108,6 +108,18 @@ The hooks are Claude Code-specific; the mechanisms and config are host-agnostic.
 Rules here are earned, not invented — a new one needs a reproduction and a named layer.
 See [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Useful links
+
+- [Jujutsu (jj)](https://github.com/jj-vcs/jj) — the VCS everything here is built on, and
+  its [official documentation](https://jj-vcs.github.io/jj/latest/).
+- [VisualJJ](https://www.visualjj.com/) — a jj extension for VS Code, JetBrains IDEs and
+  Visual Studio. A graphical view of the operation log and the change graph is the fastest
+  way for a human to check what agents did to a repository, and to recover from an
+  operation without guessing at revsets.
+- [agentic-jayjay](https://github.com/CodeAlive-AI/agentic-jayjay) — a native macOS GUI
+  for jj (Rust + SwiftUI): DAG graph, side-by-side diffs, interdiff, conflict resolution.
+  Useful when supervising parallel agents, where reading a graph beats reading log output.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
