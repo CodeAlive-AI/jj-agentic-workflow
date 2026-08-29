@@ -9,11 +9,41 @@ agents load on demand), **mechanisms** (guarded wrappers, config, hooks that enf
 rules the skills state), and **tests** that prove the hazards the rules guard against are
 real on the current jj version.
 
-**Quick start:** point your agent at this repository and say:
+## Install: hand this to your agent
 
-> Read AGENTS.md in this repository and install the workflow on this machine.
+You do not install this by hand. Give your agent the repository URL (or a local clone
+path) and say:
+
+> Read AGENTS.md in this repository and install the workflow on this machine, then
+> onboard my projects.
+
+[`AGENTS.md`](AGENTS.md) is a complete, agent-executable procedure: it installs the
+mechanisms and config, registers the hooks, places the skills, runs the hazard test suite
+to verify the installation, and then onboards your repositories following
+[`skills/working-with-jj/references/onboarding.md`](skills/working-with-jj/references/onboarding.md)
+— which lives inside the skill, so an already-installed agent can re-onboard any new
+project later without this repository at hand. The agent asks before overwriting anything
+you already have and finishes with a report of what it did.
 
 Everything below is for humans who want to know what they are installing.
+
+## What makes this different
+
+Most jj guides teach commands; most agent-workflow posts are speculation. This is
+neither:
+
+- **It is experience, not theory.** Every rule was earned in months of real multi-agent
+  development on production repositories — each traces to a measured reproduction in the
+  test suite or to an actual incident (work silently reverted by `jj undo`, a secret
+  captured by auto-snapshot, a trunk forked by a push around unpublished work).
+- **It is specifically about parallel agents.** The hazards it guards against barely
+  exist for a single human user; they dominate the moment several writers — agents and
+  humans — share one repository. That focus is the whole point.
+- **It enforces instead of exhorting.** Rules that agents kept violating as prose were
+  moved into wrappers, config, and hooks; the skills only carry what cannot be mechanised.
+- **It self-verifies and self-corrects.** The test suite asserts the hazards are still
+  real on your jj version, and the built-in reflection loop reviews recorded guard events
+  to propose moving rules between layers — including deleting them.
 
 ## Why this exists
 
