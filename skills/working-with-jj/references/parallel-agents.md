@@ -75,6 +75,28 @@ PreToolUse and prints the resolve-then-abandon commands. Recovery, if it already
 forward as always: `jj bookmark set <name> -r 'commit_id("<full id>")'` back onto the same commit,
 then rebase your own change onto it. Never `jj undo` — it would take the other writer with it.
 
+## A conflicted bookmark is not a usable name
+
+Two writers moving the same bookmark to unrelated commits leave it conflicted (`main??`,
+"Name `main` is conflicted"). The name then resolves to more than one revision, so `jj log -r main`
+errors and every ancestry claim about `main` — landed, ahead, behind, contains — is unfounded until
+it is reconciled.
+
+The Git side hides this. jj exports only one side of a conflicted bookmark, so `git branch -v`,
+`git merge-base` and any IDE panel show a single healthy `main` and answer questions about one
+arbitrary half. A colocated repository is therefore the worst place to diagnose this from Git.
+
+Reconcile by rebasing the *unpublished* side onto the published one, never the reverse:
+
+```
+jj rebase -s 'roots(bookmarks(exact:"main") & ~::main@origin)' -d main@origin
+jj land <new-tip>
+```
+
+`jj land` refuses to move a conflicted bookmark and prints this rebase; the world-watch hook
+announces the transition when another writer creates it. Report the divergence to the user rather
+than describing the graph from a listing that only sees one side.
+
 ## Reads snapshot the working copy
 
 `status`, `log`, `diff`, `op log` all snapshot first. Measured on a repo with one stray file
@@ -109,6 +131,20 @@ loss channel.
   `jj workspace list` before retrying, and forget the half-built workspace explicitly.
 - Serialise workspace creation. Concurrent `jj workspace add` from the same workspace is a known
   upstream failure mode, not a supported pattern.
+
+## Absence is the easiest thing to read wrongly
+
+A revset that matches nothing returns empty, not an error, so a wrong query is indistinguishable
+from "no such commit" — and in a shared repository the conclusion you draw from it ("their work is
+gone", "nothing is unlanded") is the one that causes damage. String predicates need an explicit
+pattern kind: `description(substring:"fix")`, `description(glob:"wip:*")`; bare
+`description("fix")` silently matches nothing. Before concluding that work is absent, ask the same
+question a second way — `jj log -r 'all()'`, `jj evolog`, `jj op log`.
+
+Ancestry has the same shape of trap. Judge it with an explicit predicate —
+`jj log -r 'A::B'`, or `git merge-base --is-ancestor A B` — never by reading `git log A..B` output:
+a listing shows reachability, not separateness, so one commit listed means exactly one ahead, i.e.
+a direct descendant, and a listing against a conflicted bookmark answers about one side only.
 
 ## Identity in reports
 

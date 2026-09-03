@@ -14,10 +14,8 @@ description: Use Jujutsu safely in any jj-enabled repository. Use when changing 
   default and needs no authorization; integrating other writers' work, pushing, releasing, or
   deploying still requires explicit authorization.
 - A conflicted bookmark (`main??`, "Name `main` is conflicted") makes that name an ambiguous
-  revset: no ancestry claim about it is meaningful, and `git merge-base` against the colocated
-  ref answers about only one side. Reconcile it before reasoning — rebase the unpublished side
-  onto `<bookmark>@origin`, never the reverse — and state the divergence to the user rather than
-  describing the graph from a listing.
+  revset: stop, reconcile it, and say so — never describe the graph as if the name resolved.
+  How, and why the Git side looks fine: [parallel-agents.md](references/parallel-agents.md).
 - After `jj land`, read its hanging-heads report: integrate, park, or report each item — never
   ignore it.
 - If shared `@` holds a change you did not author, open your own change before editing files.
@@ -41,11 +39,8 @@ description: Use Jujutsu safely in any jj-enabled repository. Use when changing 
   is inspection-only; mutating under it forks the operation log and can drop bookmarks and
   commits from the visible graph.
 - A revset that matches nothing returns empty, not an error, so a wrong query reads as "no such
-  commit". String predicates need an explicit pattern kind — `description(substring:"fix")`,
-  `description(glob:"wip:*")`; bare `description("fix")` silently matches nothing. Before
-  concluding that work is absent, run the same question a second way (`jj log -r 'all()'`,
-  `jj evolog`).
-- Judge ancestry with an explicit predicate — `jj log -r 'A::B'` or `git merge-base --is-ancestor A B` — never by eyeballing `git log A..B` output: a listing shows reachability, not separateness (one commit listed = exactly one ahead, i.e. a direct descendant).
+  commit"; judge ancestry with a predicate (`jj log -r 'A::B'`), never by eyeballing a listing.
+  Both traps and their exact forms: [parallel-agents.md](references/parallel-agents.md).
 
 ## Land, park, see (host-provided commands)
 
@@ -73,7 +68,8 @@ worktrees, or jj workspaces unless the user explicitly asks or a launcher assign
 *parents* of the creator's `@`, and with an ambiguous or conflicted name it registers the workspace
 anyway on an unintended base. Verify the new workspace's `@-` before working in it.
 
-In a colocated repository Git's HEAD is normally detached, so tooling that asks for the current
+In a colocated repository Git's HEAD is normally detached and tracks `@-`, not `@`, so every
+Git-side view is one commit behind your working copy and tooling that asks for the current
 branch (`git branch --show-current`, deploy or publish scripts) sees none and may refuse to run.
 Do not "fix" this with `git checkout`; run branch-dependent tooling from a scratch clone.
 
