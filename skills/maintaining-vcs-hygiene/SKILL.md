@@ -72,22 +72,22 @@ without culture, each recreates half of the incidents these rules came from.
   refuses an abandon, squash or rebase as immutable, that refusal is evidence about the
   commit, not an obstacle to route around: it says the commit is already published. Stop and
   re-derive why you thought it was disposable.
-- Attribution stays honest — and specific. In a checkout with several writers, "the human's
-  name on every commit" is anonymity, not attribution: the author field should name the
-  executing agent (jj: `JJ_USER`/`JJ_EMAIL` in the session environment; git: repo-local
-  `user.name`/`user.email` in single-writer clones). Never impersonate another writer or
-  strip co-authorship; when useful, carry the ordering context (session or task id) as a
-  commit trailer so the intent conversation stays findable.
-- Agent identities must be real addresses. Hosts verify signatures against the committer's
-  account-registered email, so a synthetic domain in the committer field turns a validly
-  signed commit into "unverified" and a required-signature rule rejects the push. Use real,
-  account-verified agent addresses (e.g. aliases on the org domain); until they are
-  registered, keep the committer human and carry agent identity in the author field and
-  trailers only.
-- The model is attribution too, and unlike the CLI it changes mid-session — so it cannot live
-  in static env. Record it where it is known at commit time: interactive agents add a
-  `Model: <exact-model-id>` trailer when describing; spawned workers, whose model is fixed for
-  life, embed it in the clone identity (`user.name "<worker-id> (<model>)"`).
+- Attribute the executing agent as the author while preserving the configured committer
+  identity. In Git, use `git commit --author="Agent Name <approved-agent-email>"`;
+  in jj, use `jj metaedit --author "Agent Name <approved-agent-email>"` on your own
+  change. Use an existing, user-approved agent address; do not invent one. If none is established, preserve
+  the configured author and identify the agent in a commit trailer.
+- Do not change `user.name`/`user.email`, pass identity-wide `git -c user.*` or
+  `jj --config user.*` overrides, or set `GIT_COMMITTER_*`/`JJ_USER`/`JJ_EMAIL` merely
+  to attribute agent work. These also change the committer, even in isolated clones.
+  Preserve existing co-authorship and never impersonate another writer.
+- Keep signing enabled where required and the committer email linked to the signing
+  account. A valid local signature is not proof of GitHub verification. Inspect the
+  resulting author, committer and signature before pushing; do not disable signing
+  or rewrite published history to repair identity without explicit authorization.
+- Record the executing model in a `Model: <exact-model-id>` trailer when known,
+  including for spawned workers. Model attribution must not change the signing
+  identity or repository user configuration.
 - Attribution and message shape are checked on the result, not on the command that produced it,
   because `--stdin`, an editor, a script, or another agent CLI writes descriptions no
   command-lint can see. Where the repository ships the check, missing attribution, a subject

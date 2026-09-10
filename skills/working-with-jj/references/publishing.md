@@ -19,8 +19,10 @@ pushes with a pre-push hook, run it manually first.
 If the remote requires verified signatures: jj stamps the committer from the current user
 identity on every rewrite (including `jj sign`), and the host verifies the signature against
 the committer's account-registered email. Signing with an unregistered identity yields
-"unverified" and a rejected push — re-sign with a registered identity
-(`JJ_USER=… JJ_EMAIL=… jj sign -r <revset>`) before pushing. Note that jj's default
+"unverified" and a rejected push. For your own unpublished changes, restore the
+configured account-linked identity and re-sign with `jj sign -r <revset>`; preserve
+agent authorship through the author field, not identity-wide overrides. Do not
+rewrite published history without explicit authorization. Note that jj's default
 `signing.behavior = "drop"` removes signatures on rewrite, so sign as the final step. After the repository's publish checks pass:
 
 ```bash

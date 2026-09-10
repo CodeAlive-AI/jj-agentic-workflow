@@ -25,8 +25,10 @@ the hooks and wrappers carry the enforcement.
 Facts an agent cannot discover reliably, or that differ from defaults:
 
 - **Trunk bookmark name** if it is not `main`/`master`/`trunk` (the wrappers autodetect those).
-- **Commit identity**: whose name goes in the author field, which env vars to export
-  (`JJ_USER`, `JJ_EMAIL`), which trailers are required (agent co-authorship, model id).
+- **Commit identity**: the account-linked committer, any approved agent author address,
+  and required trailers. Set agent authorship with `jj metaedit --author`; do not
+  override `JJ_USER`/`JJ_EMAIL` for attribution because rewrites also use them for
+  the committer.
 - **Workspace layout** for parallel work: where managed workspaces live, which launcher command
   creates them, and the rule that agents never create one on their own initiative.
 - **Push policy**: who may push, from which checkout, and what gates run.
