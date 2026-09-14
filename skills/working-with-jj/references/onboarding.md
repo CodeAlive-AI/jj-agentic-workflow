@@ -52,6 +52,24 @@ Applied once per machine, not per repository:
   `jj-agent-reflect` (reflection report).
 - Agent-host hooks where the host supports them: a world-watch hook (repository moved under
   the agent) and a session-end hook (no unlanded work at stop).
+- The agent host's own Git automation, switched off **with the user's approval** (next section).
+
+## Agent-host Git automation
+
+Desktop agent apps assume a Git branch workflow: they fetch in the background, create a worktree
+per session, clean worktrees up and merge pull requests. Under jj each of those is a writer nobody
+asked for — a fetch imports refs, a worktree is a second checkout outside `jj workspace`, a
+deleted Git ref can take file content with it (see parallel-agents.md). Ask the user, back up the
+settings file, then turn off what the host allows. Checked September 2026:
+
+| Host | Can be turned off | Cannot be turned off |
+|---|---|---|
+| Codex App | worktree upstream refresh → `never`; automatic worktree cleanup; PR auto-merge (`allow_auto_merge: false`); run tasks and automations in **Local** mode, not Worktree | background `git status`/`diff` polling ([openai/codex#32986](https://github.com/openai/codex/issues/32986)) |
+| Claude Code Desktop | `"worktree": {"baseRef": "head"}` in `~/.claude/settings.json` — new worktrees start from local `HEAD`, no fetch of `origin` first | background `git fetch` on diff refresh ([anthropics/claude-code#84698](https://github.com/anthropics/claude-code/issues/84698)); the per-session worktree itself — use the `claude` CLI without `--worktree` where that matters |
+
+Do not block `git fetch` by renaming remotes or wrapping `git`: it breaks `jj git fetch`, and the
+cure is worse than a read-only fetch. Tell the user what remains on and that the apps need a
+restart. Re-check the open issues when a host updates.
 
 ## The order matters
 

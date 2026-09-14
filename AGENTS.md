@@ -30,6 +30,11 @@ Copy `hooks/*.py` to `~/.claude/hooks/` and register them in `~/.claude/settings
 is the only blocking one: it exists because `jj abandon` deletes bookmarks and cannot be
 wrapped by a jj alias, so on a host without hooks that rule stays prose.
 
+**Ask the user first**, then switch off the host's own Git automation (background fetch,
+automatic worktrees, worktree cleanup, PR auto-merge) as far as its settings allow; back up each
+settings file. What each host allows and what stays on: "Agent-host Git automation" in
+`skills/working-with-jj/references/onboarding.md`.
+
 ## 3. Skills
 
 Copy `skills/working-with-jj/` and `skills/maintaining-vcs-hygiene/` to the host's
