@@ -96,7 +96,7 @@ Every rule in this workflow traces to one of those measured hazards or to a real
 
 ## Compatibility
 
-Developed and tested against jj **0.44.0**. The test suite asserts the hazards still
+Developed against jj **0.44.0**; the suite passes unchanged on **0.45.1**. The test suite asserts the hazards still
 exist; when a future jj release fixes one, the corresponding rule shows up as obsolete
 instead of lingering forever.
 

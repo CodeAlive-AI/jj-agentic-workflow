@@ -99,6 +99,20 @@ jj land <new-tip>
 announces the transition when another writer creates it. Report the divergence to the user rather
 than describing the graph from a listing that only sees one side.
 
+## A divergent change: converge only what is not landed
+
+Concurrent rewrites of one change leave two visible commits with the same change id
+(`(divergent)` in `jj log`). A typical trace: one twin carries the edits, the other is empty,
+and `jj land @` picks the empty one. Since 0.45, `jj converge --no-interactive` replaces the
+twins with one commit and aborts rather than guessing; checked on 0.45.1 with exactly that
+empty/non-empty pair. It is experimental and it rewrites descendants and moves local bookmarks
+to the new commit, which is a sideways move `jj land` would refuse. So:
+
+- no bookmark on either twin → `jj converge --no-interactive`, then `jj op show -p` and the
+  tests; a clean exit does not mean a correct tree.
+- a bookmark already on one twin → keep that commit and bring the other forward into it:
+  `jj squash --from 'commit_id("<other>")' --into 'commit_id("<bookmarked>")'`.
+
 ## Reads snapshot the working copy
 
 `status`, `log`, `diff`, `op log` all snapshot first. Measured on a repo with one stray file
