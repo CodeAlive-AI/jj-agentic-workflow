@@ -19,6 +19,12 @@ description: Use Jujutsu safely in any jj-enabled repository. Use when changing 
   Same for a `(divergent)` change, even though `main` still resolves.
 - After `jj land`, read its hanging-heads report: integrate, park, or report each item — never
   ignore it.
+- "Committed to main" means landed **and** the repository's default checkout standing on it.
+  Each workspace has its own `@`, so `jj land` from `.workspaces/<task>` leaves the owner's
+  folder on the old commit and the file you just reported is not there. After landing, run
+  `jj new <trunk>` in the default checkout, then report. If its working copy holds someone's
+  uncommitted work (`jj --ignore-working-copy diff -r 'default@' --stat` is not empty), say so
+  instead of moving it.
 - If shared `@` holds a change you did not author, open your own change before editing files.
 - Never publish a tip that does not contain the local trunk bookmark: landed-but-unpublished
   work exists exactly there, and pushing around it forks the shared trunk (a conflicted
