@@ -49,8 +49,9 @@ These wrappers exist on this machine; prefer them over raw bookmark commands.
 
 - `jj land [<rev>] [--to <bookmark>]` — move trunk to `<rev>` (default `@-`). Refuses: a
   conflicted trunk, a sideways move, a target missing published `@origin` work, conflicted or
-  divergent commits, a `<rev>` that is not exactly one commit. On refusal it prints what to run. After any
-  land it lists heads hanging outside every bookmark: integrate, park, or report each.
+  divergent commits, a `<rev>` that is not exactly one commit, a path in `land.forbidden`. On
+  refusal it prints what to run. After any land it lists the files the range added (read every
+  `WARN`) and heads hanging outside every bookmark: integrate, park, or report each.
 - `jj park <name> [<rev>]` — set `parked/<name>`. Positional arguments only, no flags. Default
   revision: `@` when it is non-empty or described, else `@-`. Verify the printed commit id is
   the change you meant.
@@ -114,7 +115,7 @@ for the description body. Line-range history needs colocated read-only `git log 
 
 ## A stray file is committed before you notice
 
-jj has no untracked state: every new file that is not ignored joins the current change the moment
+By default jj has no untracked state: every new file that is not ignored joins the current change the moment
 any jj command runs. Ignore rules therefore have to exist *before* work starts, and
 `.gitignore` is not retroactive — adding an already-tracked path to it does not untrack the file,
 and its later edits keep being snapshotted. Untrack with `jj file untrack <path>` (the file stays

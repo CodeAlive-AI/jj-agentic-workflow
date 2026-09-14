@@ -189,5 +189,23 @@ if jj converge --help >/dev/null 2>&1; then
     || bad "converge kept the bookmark on a descendant — re-check the reference rule"
 fi
 
+say "10. landing reports what the range adds, and refuses forbidden paths"
+R=$(mk additions)
+( cd "$R"; jj new main -m "add stuff"; echo x > debug.log; echo e > .env.example; mkdir src; echo s > src/app.py
+  jj new -m "drop log"; rm debug.log; jj status ) >/dev/null 2>&1
+OUT=$( cd "$R"; "$LAND" @ 2>&1 )
+[ "$(desc "$R" main)" = "drop log" ] && ok "warnings do not block landing" || bad "land blocked by a warning: $OUT"
+grep -q 'WARN.*debug\.log.*deleted again' <<<"$OUT" && ok "added-then-deleted litter is still reported" || bad "add-then-delete not reported: $OUT"
+grep -q 'WARN.*\.env\.example' <<<"$OUT" && bad ".env.example was flagged: $OUT" || ok ".env.example is not flagged"
+grep -q 'src/app\.py' <<<"$OUT" && ok "ordinary additions are listed" || bad "src/app.py missing from the report: $OUT"
+R=$(mk forbidden)
+( cd "$R"; jj config set --repo land.forbidden "'root-glob:\"secrets/**\"'"
+  jj new main -m "oops"; mkdir secrets; echo k > secrets/k.txt; jj new -m "remove"; rm -r secrets; jj status ) >/dev/null 2>&1
+MAIN0=$(jj -R "$R" --ignore-working-copy log -r main --no-graph -T commit_id)
+OUT=$( cd "$R"; "$LAND" @ 2>&1 )
+if [[ "$OUT" == *REFUSED*secrets/k.txt* && "$(jj -R "$R" --ignore-working-copy log -r main --no-graph -T commit_id)" == "$MAIN0" ]]; then
+  ok "a forbidden path refuses the land, even when a later commit deletes it"
+else bad "forbidden path not refused: $OUT"; fi
+
 printf '\n\033[1mtotal: %d passed, %d failed\033[0m\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -10,7 +10,10 @@
 #   * the target or its unlanded ancestors contain conflicts;
 #   * the landing range contains a DIVERGENT change (one change id, several visible
 #     commits — trunk can end up on the twin that does not hold the work);
-#   * <rev> resolves to anything but exactly one revision.
+#   * <rev> resolves to anything but exactly one revision;
+#   * a commit in the range touches a path in the repository's `land.forbidden` fileset.
+# After a land it reports every file the range added, per commit (added-then-deleted too),
+# flagging secret- or scratch-shaped names and large files. Filename policy, not secret detection.
 # Every check reads before the final bookmark move; concurrent writers can still change
 # the repository in between. This narrows mistakes, it is not an atomic guarantee.
 set -euo pipefail
@@ -140,9 +143,70 @@ if [[ -n "$(jj log --ignore-working-copy -r "($old..$target | $rev) & conflicts(
     exit 1
 fi
 
+# --- Guard 5: paths this repository forbids --------------------------------
+root=$(jj workspace root 2>/dev/null || pwd)
+forbidden=$(jj config get land.forbidden 2>/dev/null || true)
+if [[ -n "$forbidden" ]]; then
+    hits=""
+    for c in $(jj log --ignore-working-copy -r "$old..$target" --no-graph -T 'commit_id ++ "\n"' 2>/dev/null); do
+        if ! out=$(cd "$root" && jj diff --ignore-working-copy -r "commit_id(\"$c\")" --summary -- "$forbidden" 2>/dev/null); then
+            echo "jj land: REFUSED — land.forbidden is not a valid fileset: $forbidden" >&2
+            exit 1
+        fi
+        [[ -n "$out" ]] && hits+=$(printf '%s\n' "$out" | sed "s/^/  ${c:0:12} /")$'\n'
+    done
+    if [[ -n "$hits" ]]; then
+        ev land-refused rule=forbidden-path
+        echo "jj land: REFUSED — the range touches paths this repository forbids (land.forbidden = $forbidden):" >&2
+        printf '%s' "$hits" >&2
+        echo "Remove them from every commit listed, untrack and ignore the path, then land again." >&2
+        echo "Deleting in a later commit is not enough: the earlier commit still carries the file." >&2
+        echo "If it held a credential, it is exposed once snapshotted — tell the user and rotate it." >&2
+        exit 1
+    fi
+fi
+
+report_additions() {
+    local added n c p note sz warned=0
+    added=$(cd "$root" && jj log --ignore-working-copy -r "$old..$target" --no-graph \
+        -T 'diff.files().filter(|f| f.status() == "added").map(|f| commit_id ++ "\t" ++ f.path()).join("\n") ++ "\n"' \
+        2>/dev/null | grep . || true)
+    [[ -z "$added" ]] && return 0
+    n=$(printf '%s\n' "$added" | wc -l | tr -d ' ')
+    echo ""
+    echo "jj land: the range adds $n file(s):"
+    while IFS=$'\t' read -r c p; do
+        note=""
+        case "${p##*/}" in
+            .env.example|.env.sample|.env.template|.env.dist) ;;
+            .env|.env.*|*.pem|*.key|*.p12|*.pfx|*.keystore|id_rsa*|id_dsa*|id_ecdsa*|id_ed25519*) note="secret-shaped name" ;;
+            *.log|*.tmp|*.bak|*.orig|*.rej|*.swp|*~|.DS_Store|nohup.out) note="scratch-shaped name" ;;
+        esac
+        case "/$p" in */node_modules/*|*/__pycache__/*|*/tmp/*|*/scratch/*|*/.scratch/*) note="${note:-scratch-shaped path}" ;; esac
+        if [[ -z "$(cd "$root" && jj file list --ignore-working-copy -r "commit_id(\"$target\")" -- "root:\"$p\"" 2>/dev/null)" ]]; then
+            note="${note:+$note; }deleted again later in the range, still in history"
+        else
+            sz=$(cd "$root" && jj file show --ignore-working-copy -r "commit_id(\"$target\")" -- "root:\"$p\"" 2>/dev/null | wc -c | tr -d ' ')
+            [[ "${sz:-0}" -gt 102400 ]] && note="${note:+$note; }$((sz / 1024)) KiB"
+        fi
+        if [[ -n "$note" ]]; then
+            echo "  WARN ${c:0:12} $p  ($note)"; warned=$((warned + 1))
+        else
+            echo "       ${c:0:12} $p"
+        fi
+    done < <(printf '%s\n' "$added" | head -50)
+    [[ "$n" -gt 50 ]] && echo "  ... $((n - 50)) more"
+    if [[ "$warned" -gt 0 ]]; then
+        ev land-warned rule=suspicious-additions "count=$warned"
+        echo "Check each WARN line: litter belongs outside the checkout, and a snapshotted secret is exposed even if deleted."
+    fi
+    return 0
+}
+
 jj bookmark set "$bookmark" -r "$target"
 n_landed=$(jj log --ignore-working-copy -r "$old..$target" --no-graph -T '"x"' 2>/dev/null | wc -c | tr -d ' ')
 ev land-succeeded "commits=$n_landed"
 echo "jj land: $bookmark ${old:0:12} -> ${target:0:12} (fast-forward, $n_landed commit(s))."
+report_additions
 jj status
 report_hanging

@@ -54,6 +54,15 @@ none at all on a host without hooks, or for a human typing the command directly.
 partial mechanism over pure prose because the failure it prevents is unrecoverable-looking
 (trunk gone, descendants rebased) and, in our own logs, recurrent.
 
+## Trade-off: file checks at landing are policy, not detection
+
+Litter is decided where output is written; `jj land` is a late backstop. It warns on names and
+sizes and refuses only paths a repository explicitly forbids, because a universal filename
+blocklist both blocks legitimate files (`.env.example`, public certificates) and misses secrets in
+ordinary files. A content scanner was rejected for the same reason in the other direction: it
+would read secret values into agent output. Capture happens at snapshot time, before any landing,
+so no landing check can undo it — the reference says so instead of implying otherwise.
+
 ## Trade-off: event log is local and unauthenticated
 
 `jj-agent-event` appends plain JSONL with no signing and logs only rule names, ids and

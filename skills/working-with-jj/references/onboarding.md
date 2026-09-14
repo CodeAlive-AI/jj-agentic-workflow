@@ -35,6 +35,12 @@ Facts an agent cannot discover reliably, or that differ from defaults:
 - **Ignore rules that must exist before work starts** (build output, coverage, scratch
   locations) — because jj snapshots new files immediately, this is an onboarding step, not a
   cleanup step.
+- **Scratch location** for hosts that do not provide a session scratchpad (Claude Code does;
+  Codex does not): one absolute directory outside the checkout, such as
+  `${TMPDIR:-/tmp}/<repo>/<session>`. It is temporary by design; anything meant to outlive the
+  session belongs in a change.
+- **Forbidden paths**, if any: the fact here, the mechanism in each clone's repository config
+  (`jj config set --repo land.forbidden '<fileset>'`), which `jj land` refuses to land.
 - A pointer to any repository-specific companion skill, loaded *in addition to* the two core
   skills, never instead of them.
 

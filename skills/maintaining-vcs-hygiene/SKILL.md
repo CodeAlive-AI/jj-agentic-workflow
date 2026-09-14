@@ -16,7 +16,8 @@ without culture, each recreates half of the incidents these rules came from.
 ## 1. The repository is a shared, addressed space
 
 - Nothing enters the working tree unless a future reader needs it. Scratch output, logs,
-  downloads, analysis scripts, and bundles go to the session scratchpad — never the repository.
+  downloads, analysis scripts, and bundles go to a scratch directory outside the checkout — the
+  host's session scratchpad, or the one the repository's AGENTS.md names — never the repository.
 - Before the first edit, establish whose work the working copy holds (jj: `jj log -r @`;
   git: `git status` + current branch). Humans and other agent CLIs count as writers; edits in
   an auto-snapshotting VCS silently join whatever change is checked out.
@@ -96,8 +97,9 @@ without culture, each recreates half of the incidents these rules came from.
 
 ## 5. Litter is removed at the source
 
-- A stray artifact in `status` output means a missing ignore rule — fix the rule, but scope it
-  narrowly: over-broad patterns (`bin/`, `*.so`) silently swallow real files such as test
+- A stray artifact in `status` output usually means output was written to the wrong place — fix
+  the destination first. Add an ignore rule only for output that must live in the checkout, and
+  scope it narrowly: over-broad patterns (`bin/`, `*.so`) silently swallow real files such as test
   fixtures and vendored sources, and the loss surfaces only in CI or never.
 - Close what you opened: delete merged branches and bookmarks you created, remove finished
   workspaces and scratch clones, drop stale remotes and bundles.
