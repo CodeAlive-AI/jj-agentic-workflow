@@ -78,7 +78,9 @@ then rebase your own change onto it. Never `jj undo` — it would take the other
 ## A conflicted bookmark is not a usable name
 
 Two writers moving the same bookmark to unrelated commits leave it conflicted (`main??`,
-"Name `main` is conflicted"). The name then resolves to more than one revision, so `jj log -r main`
+"Name `main` is conflicted"). One of the writers can be an IDE or desktop app running a background
+`git fetch` after you landed but before you pushed (onboarding.md, "Agent-host Git automation").
+The name then resolves to more than one revision, so `jj log -r main`
 errors and every ancestry claim about `main` — landed, ahead, behind, contains — is unfounded until
 it is reconciled.
 

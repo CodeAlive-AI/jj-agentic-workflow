@@ -58,8 +58,16 @@ Applied once per machine, not per repository:
 
 Desktop agent apps assume a Git branch workflow: they fetch in the background, create a worktree
 per session, clean worktrees up and merge pull requests. Under jj each of those is a writer nobody
-asked for — a fetch imports refs, a worktree is a second checkout outside `jj workspace`, a
-deleted Git ref can take file content with it (see parallel-agents.md). Ask the user, back up the
+asked for — a worktree is a second checkout outside `jj workspace`, a deleted Git ref can take
+file content with it (see parallel-agents.md), and a background fetch **moves your bookmarks**.
+jj imports the fetched `refs/remotes/*` on its next command and merges them into tracked
+bookmarks. Reproduced on 0.44.0 with a plain `git fetch` in a colocated repository:
+
+- local `main` untouched → it fast-forwards to the remote tip. Trunk moved, no `jj land` ran.
+- local `main` already moved (landed, not yet pushed) → `main` becomes **conflicted** (`main??`),
+  and every command that names `main` fails until someone reconciles it.
+
+Nobody asked for either, and the host that ran the fetch logs nothing. Ask the user, back up the
 settings file, then turn off what the host allows. Checked September 2026:
 
 | Host | Can be turned off | Cannot be turned off |
@@ -67,8 +75,9 @@ settings file, then turn off what the host allows. Checked September 2026:
 | Codex App | worktree upstream refresh → `never`; automatic worktree cleanup; PR auto-merge (`allow_auto_merge: false`); run tasks and automations in **Local** mode, not Worktree | background `git status`/`diff` polling ([openai/codex#32986](https://github.com/openai/codex/issues/32986)) |
 | Claude Code Desktop | `"worktree": {"baseRef": "head"}` in `~/.claude/settings.json` — new worktrees start from local `HEAD`, no fetch of `origin` first | background `git fetch` on diff refresh ([anthropics/claude-code#84698](https://github.com/anthropics/claude-code/issues/84698)); the per-session worktree itself — use the `claude` CLI without `--worktree` where that matters |
 
-Do not block `git fetch` by renaming remotes or wrapping `git`: it breaks `jj git fetch`, and the
-cure is worse than a read-only fetch. Tell the user what remains on and that the apps need a
+Do not block `git fetch` by renaming remotes or wrapping `git`: that also breaks `jj git fetch`.
+What stays on is covered by `jj land`, which refuses a conflicted trunk and prints the rebase, and
+by the world-watch hook, which reports when a bookmark moves under the agent. Tell the user what remains on and that the apps need a
 restart. Re-check the open issues when a host updates.
 
 ## The order matters
