@@ -16,6 +16,8 @@ mk() { # $1 name -> path with base/main
   echo "$d"
 }
 desc() { jj -R "$1" --ignore-working-copy log -r "$2" --no-graph -T 'description.first_line()' 2>/dev/null; }
+# Exercise this checkout's wrapper, not whatever `jj land` is installed on the machine.
+LAND="$(cd "$(dirname "$0")/../bin" && pwd)/jj-land"
 
 say "1. recovery mode: forward fixes spare the co-worker, rewinds do not"
 recov() { # $1 label, $2 command
@@ -77,12 +79,12 @@ case "$OUT" in *private*) bad "clean commit wrongly blocked" ;; *) ok "clean com
 say "5. jj land guards still hold under the new configuration"
 R=$(mk land)
 ( cd "$R"; jj new main -m "one"; echo 1 > one.txt; jj status ) >/dev/null 2>&1
-OUT=$( cd "$R"; jj land @ 2>&1 ); case "$(desc "$R" main)" in "one") ok "forward land works" ;; *) bad "forward land failed: $OUT" ;; esac
+OUT=$( cd "$R"; "$LAND" @ 2>&1 ); case "$(desc "$R" main)" in "one") ok "forward land works" ;; *) bad "forward land failed: $OUT" ;; esac
 BASE=$(jj -R "$R" --ignore-working-copy log -r 'description(substring:"base")' --no-graph -T commit_id)
-OUT=$( cd "$R"; jj land "$BASE" 2>&1 )
+OUT=$( cd "$R"; "$LAND" "$BASE" 2>&1 )
 case "$OUT" in *REFUSED*|*ancestor*) ok "backwards land refused" ;; *) bad "backwards land NOT refused: $OUT" ;; esac
 ( cd "$R"; jj new "commit_id(\"$BASE\")" -m "sibling"; echo s > s.txt; jj status ) >/dev/null 2>&1
-OUT=$( cd "$R"; jj land @ 2>&1 )
+OUT=$( cd "$R"; "$LAND" @ 2>&1 )
 case "$OUT" in *rebase*) ok "sideways land refused with a rebase hint" ;; *) bad "sideways land not refused: $OUT" ;; esac
 case "$OUT" in *"roots(::"*) ok "hint uses whole-ancestry roots(::...)" ;; *) bad "hint would split a stack: $OUT" ;; esac
 
@@ -107,9 +109,9 @@ done
 say "7. guardrail events are actually recorded"
 export JJ_AGENT_STATE="$LAB/events"; mkdir -p "$JJ_AGENT_STATE"
 R=$(mk events)
-( cd "$R"; jj new main -m "one"; echo 1 > one.txt; jj status; jj land @ ) >/dev/null 2>&1
+( cd "$R"; jj new main -m "one"; echo 1 > one.txt; jj status; "$LAND" @ ) >/dev/null 2>&1
 BASE=$(jj -R "$R" --ignore-working-copy log -r 'description(substring:"base")' --no-graph -T commit_id)
-( cd "$R"; jj land "$BASE" ) >/dev/null 2>&1
+( cd "$R"; "$LAND" "$BASE" ) >/dev/null 2>&1
 EVLOG="$JJ_AGENT_STATE/events.jsonl"
 if [ -s "$EVLOG" ]; then ok "guards write events (silence would be indistinguishable from success)"; else bad "no events written — guards are not instrumented"; fi
 grep -q '"event":"land-succeeded"' "$EVLOG" 2>/dev/null && ok "a successful land is recorded" || bad "successful land not recorded"
@@ -119,7 +121,7 @@ unset JJ_AGENT_STATE
 
 say "8. jj abandon is the back door around the trunk guard"
 R=$(mk abandon-bookmark)
-( cd "$R"; jj new main -m "landed work"; echo w > w.txt; jj status; jj land @; jj new -m next ) >/dev/null 2>&1
+( cd "$R"; jj new main -m "landed work"; echo w > w.txt; jj status; "$LAND" @; jj new -m next ) >/dev/null 2>&1
 MAIN=$(jj -R "$R" --ignore-working-copy log -r main --no-graph -T commit_id)
 OUT=$( cd "$R"; jj abandon "commit_id(\"$MAIN\")" 2>&1 )
 case "$(jj -R "$R" --ignore-working-copy log -r 'bookmarks(exact:"main")' --no-graph -T commit_id 2>/dev/null)" in
@@ -127,7 +129,7 @@ case "$(jj -R "$R" --ignore-working-copy log -r 'bookmarks(exact:"main")' --no-g
   *)  bad "main survived the abandon — re-check the rule: $OUT" ;;
 esac
 R=$(mk abandon-retain)
-( cd "$R"; jj new main -m "landed work"; echo w > w.txt; jj status; jj land @; jj new -m next ) >/dev/null 2>&1
+( cd "$R"; jj new main -m "landed work"; echo w > w.txt; jj status; "$LAND" @; jj new -m next ) >/dev/null 2>&1
 MAIN=$(jj -R "$R" --ignore-working-copy log -r main --no-graph -T commit_id)
 PARENT=$(jj -R "$R" --ignore-working-copy log -r "commit_id(\"$MAIN\")-" --no-graph -T commit_id)
 ( cd "$R"; jj abandon "commit_id(\"$MAIN\")" --retain-bookmarks ) >/dev/null 2>&1
@@ -140,7 +142,7 @@ case "$OUT" in *"Cannot define an alias that overrides"*) ok "abandon cannot be 
 
 GUARD="$(cd "$(dirname "$0")/../hooks" && pwd)/jj-abandon-guard.py"
 R=$(mk abandon-guard)
-( cd "$R"; jj new main -m "landed work"; echo w > w.txt; jj status; jj land @; jj new -m "my wip"; echo m > m.txt; jj status ) >/dev/null 2>&1
+( cd "$R"; jj new main -m "landed work"; echo w > w.txt; jj status; "$LAND" @; jj new -m "my wip"; echo m > m.txt; jj status ) >/dev/null 2>&1
 MAIN=$(jj -R "$R" --ignore-working-copy log -r main --no-graph -T commit_id)
 BASE=$(jj -R "$R" --ignore-working-copy log -r 'description(substring:"base")' --no-graph -T commit_id)
 guard() { python3 -c 'import json,sys; print(json.dumps({"tool_name":"Bash","cwd":sys.argv[1],"tool_input":{"command":sys.argv[2]}}))' "$R" "$1" | python3 "$GUARD" >/dev/null 2>&1; echo $?; }
@@ -149,6 +151,43 @@ guard() { python3 -c 'import json,sys; print(json.dumps({"tool_name":"Bash","cwd
 [ "$(guard "jj abandon 'commit_id(\"$MAIN\")'")" = 2 ] && ok "guard refuses abandoning a bookmarked commit" || bad "guard allowed deleting a bookmark"
 [ "$(guard "jj abandon 'commit_id(\"$BASE\")'")" = 2 ] && ok "guard refuses abandoning landed history" || bad "guard allowed rewriting landed history"
 [ "$(guard 'echo abandon ship')" = 0 ] && ok "guard ignores commands that merely mention abandon" || bad "guard fired on unrelated text"
+
+say "9. a divergent change cannot be landed by accident"
+R=$(mk divergent)
+( cd "$R"; jj new main -m "work"; echo w > w.txt; jj new -m next2 ) >/dev/null 2>&1
+q() { jj -R "$R" --ignore-working-copy log -r "$1" --no-graph -T 'commit_id ++ "\n"' 2>/dev/null; }
+X=$(q @-); OP=$(jj -R "$R" --ignore-working-copy op log -n1 --no-graph -T id 2>/dev/null)
+# Two writers rewrite the same change from the same operation: one edits the description,
+# the other (by accident) empties it — the shape of the empty-twin landing incident.
+( cd "$R"; jj --ignore-working-copy --at-op "$OP" describe -r "commit_id(\"$X\")" -m "work, edited"
+  jj --ignore-working-copy --at-op "$OP" restore --from main --into "commit_id(\"$X\")"
+  jj log ) >/dev/null 2>&1
+FULL=$(q 'divergent() & description(substring:"edited")')
+EMPTY=$(q 'divergent() & empty() & description(substring:"work") & ~description(substring:"edited")')
+CID=$(jj -R "$R" --ignore-working-copy log -r "commit_id(\"$FULL\")" --no-graph -T change_id 2>/dev/null)
+MAIN0=$(q main)
+[ -n "$FULL" ] && [ -n "$EMPTY" ] && ok "concurrent rewrites left an empty and a non-empty twin" \
+                                  || bad "could not build divergent twins: full='$FULL' empty='$EMPTY'"
+refused() { # $1 label, $2 revision to land
+  local out; out=$( cd "$R"; "$LAND" "$2" 2>&1 )
+  if [[ "$out" == *REFUSED* && "$(q main)" == "$MAIN0" ]]; then ok "$1"; else bad "$1: $out"; fi
+}
+refused "land refuses the empty twin and leaves trunk in place" "commit_id(\"$EMPTY\")"
+( cd "$R"; jj new "commit_id(\"$EMPTY\")" -m child; echo c > c.txt; jj status ) >/dev/null 2>&1
+refused "land refuses a plain child of a divergent twin" "@"
+refused "land refuses a revision that resolves to both twins" "change_id(\"$CID\")"
+( cd "$R"; jj new main -m "work, rebuilt"; jj restore --from "commit_id(\"$FULL\")"; "$LAND" @ ) >/dev/null 2>&1
+FILES=$( cd "$R"; jj --ignore-working-copy file list -r main 2>/dev/null )  # -R from outside prints cwd-relative paths
+[ "$(desc "$R" main)" = "work, rebuilt" ] && [[ $'\n'"$FILES"$'\n' == *$'\nw.txt\n'* ]] \
+  && ok "the printed recovery (new + restore --from the full twin) lands the work" \
+  || bad "recovery recipe failed: main is '$(desc "$R" main)'"
+if jj converge --help >/dev/null 2>&1; then
+  ( cd "$R"; jj bookmark create twin -r "commit_id(\"$FULL\")"; jj converge --no-interactive -r "change_id(\"$CID\")" ) >/dev/null 2>&1
+  NEW=$(q 'bookmarks(exact:"twin")')
+  [ -n "$NEW" ] && [ -z "$(q "commit_id(\"$FULL\")::commit_id(\"$NEW\")")" ] \
+    && ok "converge moves a bookmark on a twin sideways (reference rule is necessary)" \
+    || bad "converge kept the bookmark on a descendant — re-check the reference rule"
+fi
 
 printf '\n\033[1mtotal: %d passed, %d failed\033[0m\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

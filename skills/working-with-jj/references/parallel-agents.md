@@ -102,16 +102,25 @@ than describing the graph from a listing that only sees one side.
 ## A divergent change: converge only what is not landed
 
 Concurrent rewrites of one change leave two visible commits with the same change id
-(`(divergent)` in `jj log`). A typical trace: one twin carries the edits, the other is empty,
-and `jj land @` picks the empty one. Since 0.45, `jj converge --no-interactive` replaces the
-twins with one commit and aborts rather than guessing; checked on 0.45.1 with exactly that
-empty/non-empty pair. It is experimental and it rewrites descendants and moves local bookmarks
-to the new commit, which is a sideways move `jj land` would refuse. So:
+(`(divergent)` in `jj log`). Unlike a conflicted bookmark, nothing fails: `main` still resolves.
+The observed trace was one twin holding the edits, the other empty, and trunk landed on the empty
+one. `jj land` now refuses a divergent commit anywhere in the landing range, and a `<rev>` that
+resolves to more than one commit.
 
-- no bookmark on either twin → `jj converge --no-interactive`, then `jj op show -p` and the
-  tests; a clean exit does not mean a correct tree.
-- a bookmark already on one twin → keep that commit and bring the other forward into it:
-  `jj squash --from 'commit_id("<other>")' --into 'commit_id("<bookmarked>")'`.
+Recover without rewriting anything a bookmark reaches. Read every twin
+(`jj log -r 'change_id("<id>")' --stat`), then:
+
+- **Default:** rebuild on trunk from the twin that holds the work, when that twin already
+  contains trunk: `jj new main && jj restore --from 'commit_id("<twin>")' && jj land @`. Abandon
+  the leftover twins afterwards; they are unlanded.
+- **`jj converge`** (jj ≥ 0.45, experimental) only when no bookmark sits on the twins *or on any
+  of their descendants*: it rewrites descendants and moves their local bookmarks to commits that
+  are not descendants of the old ones — a sideways move (reproduced on 0.45.1). Scope it to one
+  change: `jj converge --no-interactive -r 'change_id("<id>")'`. It chooses by heuristics, so a clean
+  exit is not a correct tree: confirm the divergence is gone, read the resulting tree and
+  descendants, and run the tests.
+- **Never** `jj squash --from <twin> --into <bookmarked twin>`: it rewrites the bookmarked commit
+  and moves the bookmark sideways.
 
 ## Reads snapshot the working copy
 

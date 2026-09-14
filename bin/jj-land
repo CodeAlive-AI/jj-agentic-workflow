@@ -7,7 +7,12 @@
 #   * the move would be sideways (orphaning the old line);
 #   * the target does not contain what is already published on the remote
 #     (landing a line that drops published work is how local and origin diverge);
-#   * the target or its unlanded ancestors contain conflicts.
+#   * the target or its unlanded ancestors contain conflicts;
+#   * the landing range contains a DIVERGENT change (one change id, several visible
+#     commits — trunk can end up on the twin that does not hold the work);
+#   * <rev> resolves to anything but exactly one revision.
+# Every check reads before the final bookmark move; concurrent writers can still change
+# the repository in between. This narrows mistakes, it is not an atomic guarantee.
 set -euo pipefail
 ev(){ "$HOME/.local/bin/jj-agent-event" "$@" "repo=$(basename "$(jj workspace root 2>/dev/null || pwd)")" >/dev/null 2>&1 || true; }
 
@@ -44,8 +49,22 @@ if [[ "$n" -gt 1 ]]; then
     exit 1
 fi
 
+n_target=$(count_rev "$rev")
+[[ "$n_target" -eq 0 ]] && { echo "jj land: revision '$rev' does not resolve" >&2; exit 1; }
+if [[ "$n_target" -gt 1 ]]; then
+    ev land-refused rule=ambiguous-target
+    echo "jj land: REFUSED — '$rev' resolves to $n_target revisions (a divergent change id?):" >&2
+    jj log --ignore-working-copy -r "$rev" --no-graph \
+        -T '"  " ++ commit_id.short() ++ " " ++ description.first_line() ++ "\n"' >&2
+    echo "Read them, then land exactly one: jj land 'commit_id(\"<full id>\")'" >&2
+    exit 1
+fi
+if [[ $(count_rev "${bookmark}@origin") -gt 1 ]]; then
+    ev land-refused rule=conflicted-remote-bookmark
+    echo "jj land: REFUSED — ${bookmark}@origin is conflicted; fetch and reconcile it first." >&2
+    exit 1
+fi
 target=$(one_rev "$rev"); old=$(one_rev "$bookmark")
-[[ -z "$target" ]] && { echo "jj land: revision '$rev' does not resolve" >&2; exit 1; }
 
 report_hanging() {
     local hanging
@@ -95,7 +114,26 @@ if [[ -z "$(jj log --ignore-working-copy -r "::$target & $old" --no-graph -T 'co
     exit 1
 fi
 
-# --- Guard 3: no conflicted commits ----------------------------------------
+# --- Guard 3: no divergent changes -----------------------------------------
+if ! div=$(jj log --ignore-working-copy -r "($old..$target | $target) & divergent()" --no-graph \
+        -T 'change_id ++ " " ++ commit_id.short() ++ " " ++ description.first_line() ++ "\n"' 2>/dev/null); then
+    echo "jj land: REFUSED — could not check the range for divergent changes; inspect with jj log." >&2
+    exit 1
+fi
+if [[ -n "$div" ]]; then
+    ev land-refused rule=divergent-change
+    echo "jj land: REFUSED — the landing range contains a DIVERGENT change (one change id, several" >&2
+    echo "visible commits); '$bookmark' could end up on a twin that does not hold the work:" >&2
+    echo "$div" | sed 's/^/  /' >&2
+    echo "Read every twin first:  jj log -r 'change_id(\"<change id>\")' --stat" >&2
+    echo "Then either rebuild on trunk from the twin that holds the work (when it already contains '$bookmark'):" >&2
+    echo "  jj new $bookmark && jj restore --from 'commit_id(\"<twin>\")' && jj land @" >&2
+    echo "or, on jj >= 0.45 and only when no bookmark reaches the twins or their descendants:" >&2
+    echo "  jj converge --no-interactive -r 'change_id(\"<change id>\")'" >&2
+    exit 1
+fi
+
+# --- Guard 4: no conflicted commits ----------------------------------------
 if [[ -n "$(jj log --ignore-working-copy -r "($old..$target | $rev) & conflicts()" --no-graph -T 'commit_id' 2>/dev/null)" ]]; then
     ev land-refused rule=conflicted-commits
     echo "jj land: REFUSED — the target or its unlanded ancestors contain conflicts. Resolve first." >&2

@@ -25,7 +25,9 @@ integration — is safer per landing and is the model some jj tooling authors pr
 chose autonomous landing because:
 
 - the guard set (forward-only, no conflicted stacks, never drop published work, conflicted
-  bookmark refusal) mechanically excludes the destructive failure modes;
+  bookmark refusal, no divergent change in the range) mechanically excludes the destructive
+  failure modes it knows about. It is read-then-move, not atomic: a concurrent writer can
+  still change the repository between the checks and the bookmark move;
 - unlanded floating work turned out to be the bigger loss channel in practice: an agent
   dies, the session compacts, and un-addressed work silently rots;
 - pushing/publishing remains human-gated — the blast radius of a bad landing is local and

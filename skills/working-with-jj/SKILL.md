@@ -16,6 +16,7 @@ description: Use Jujutsu safely in any jj-enabled repository. Use when changing 
 - A conflicted bookmark (`main??`, "Name `main` is conflicted") makes that name an ambiguous
   revset: stop, reconcile it, and say so — never describe the graph as if the name resolved.
   How, and why the Git side looks fine: [parallel-agents.md](references/parallel-agents.md).
+  Same for a `(divergent)` change, even though `main` still resolves.
 - After `jj land`, read its hanging-heads report: integrate, park, or report each item — never
   ignore it.
 - If shared `@` holds a change you did not author, open your own change before editing files.
@@ -23,7 +24,7 @@ description: Use Jujutsu safely in any jj-enabled repository. Use when changing 
   work exists exactly there, and pushing around it forks the shared trunk (a conflicted
   bookmark for every other writer). Before `jj git push`, verify with
   `jj log -r 'main & ~::<push-tip>'` — empty output or stop.
-- Land trunk with `jj land [<rev>]`, never raw `jj bookmark set main`: it enforces forward-only moves (a sideways move orphans the old line) and refuses conflicted stacks. If it refuses, run the rebase it prints and accept the conflicts — conflicts are recoverable, orphaned lines get lost. `jj orphans` lists unreachable non-empty heads; run it when finishing multi-writer work.
+- Land trunk with `jj land [<rev>]`, never raw `jj bookmark set main`: it enforces forward-only moves (a sideways move orphans the old line) and refuses conflicted stacks. If it refuses, follow the recovery it prints and accept rebase conflicts — conflicts are recoverable, orphaned lines get lost. `jj orphans` lists unreachable non-empty heads; run it when finishing multi-writer work.
 - `jj abandon` is the back door around every trunk guard: jj **deletes** bookmarks pointing at
   an abandoned commit and rebases its descendants, so one command removes trunk and rewrites
   landed history while reporting it like any success. Abandon only your own unlanded change,
@@ -47,8 +48,8 @@ description: Use Jujutsu safely in any jj-enabled repository. Use when changing 
 These wrappers exist on this machine; prefer them over raw bookmark commands.
 
 - `jj land [<rev>] [--to <bookmark>]` — move trunk to `<rev>` (default `@-`). Refuses: a
-  conflicted trunk, a sideways move, a target missing published `@origin` work, conflicted
-  commits. On refusal it prints the exact rebase to run — run it, then land again. After any
+  conflicted trunk, a sideways move, a target missing published `@origin` work, conflicted or
+  divergent commits, a `<rev>` that is not exactly one commit. On refusal it prints what to run. After any
   land it lists heads hanging outside every bookmark: integrate, park, or report each.
 - `jj park <name> [<rev>]` — set `parked/<name>`. Positional arguments only, no flags. Default
   revision: `@` when it is non-empty or described, else `@-`. Verify the printed commit id is
