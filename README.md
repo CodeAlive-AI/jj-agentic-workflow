@@ -22,8 +22,8 @@ mechanisms and config, registers the hooks, places the skills, runs the hazard t
 to verify the installation, and then onboards your repositories following
 [`skills/working-with-jj/references/onboarding.md`](skills/working-with-jj/references/onboarding.md)
 — which lives inside the skill, so an already-installed agent can re-onboard any new
-project later without this repository at hand. The agent asks before overwriting anything
-you already have and finishes with a report of what it did.
+project later without this repository at hand. The installer backs up touched settings, preserves unrelated entries, and reports its rollback
+receipt. Active workspaces are not migrated.
 
 Everything below is for humans who want to know what they are installing.
 
@@ -53,9 +53,9 @@ cheaply. jj is the best VCS substrate for that — automatic snapshotting, first
 conflicts, cheap workspaces — but several of its properties are actively dangerous in a
 multi-writer repository, and none of them are documented as such:
 
-- `jj undo` / `jj op restore` rewind the **whole repository view** and silently revert
-  concurrent writers in other workspaces (measured, not speculated — see the test suite).
-- There are no read-only commands: even `jj status` snapshots the working copy, absorbing
+- `jj op restore` rewinds shared repository state. JJ 0.46 guards `undo`/`redo` across
+  workspaces, but shared-workspace writers and old operations still require ownership checks.
+- Ordinary reads can mutate state: even `jj status` snapshots the working copy, absorbing
   stray files into the current change.
 - There is no untracked state: a secret written to disk is committed the moment any jj
   command runs, and stays readable in `jj evolog` after "deleting" it.
@@ -87,21 +87,27 @@ Every rule in this workflow traces to one of those measured hazards or to a real
 | `AGENTS.md` | The installation procedure, written for an agent to execute |
 | `skills/working-with-jj/` | jj command-layer skill + references (parallel agents, secrets, cleanup, publishing, onboarding) |
 | `skills/maintaining-vcs-hygiene/` | VCS culture skill + the reflection procedure |
-| `bin/` | `jj-land`, `jj-agent-event`, `jj-agent-reflect` |
+| `bin/` | `jj-land`, `jj-agent`, `jj-agent-install`, event and reflection tools |
 | `config/jj-config-snippet.toml` | `[git]` safety settings and the `park`/`land`/`orphans` aliases |
-| `hooks/` | Claude Code hooks (abandon guard, world-watch, session-end); adapt for other hosts |
-| `tests/multi-writer-hazards.sh` | 23 checks proving the hazards and the guards, on a scratch repo |
+| `hooks/` + `lib/` | Common Codex/Claude guards and project-scoped Claude workspace adapter |
+| `tests/` | Hazard, lifecycle, hook-contract and installer/rollback tests in temporary repos |
 | `docs/DESIGN.md` | Design rationale and honest trade-offs |
 | `CONTRIBUTING.md` | What a new rule needs before it earns a place |
 
 ## Compatibility
 
-Developed against jj **0.44.0**; the suite passes unchanged on **0.45.1**. The test suite asserts the hazards still
-exist; when a future jj release fixes one, the corresponding rule shows up as obsolete
-instead of lingering forever.
+Current baseline: **jj 0.46.0**, Git **2.42+**, Python **3.11+** for the installer.
+New child workspaces use JJ's native Git colocation. Existing active workspaces stay unchanged.
+See [workspace lifecycle](skills/working-with-jj/references/workspace-lifecycle.md),
+[Codex integration](skills/working-with-jj/references/codex.md), and
+[Claude integration](skills/working-with-jj/references/claude-code.md).
 
-Skills use the open `SKILL.md` format (Claude Code, Codex, OpenCode and others read it).
-The hooks are Claude Code-specific; the mechanisms and config are host-agnostic.
+Skills share one canonical source across hosts. General hooks support Codex and Claude; lifecycle
+replacement is Claude project opt-in. Codex requires native hook trust and Local mode for prepared
+JJ workspaces. Synthetic Claude contract tests do not prove live Claude dispatch.
+
+The [0.46 validation report](docs/VALIDATION-0.46.md) records installed versions, test evidence,
+host limitations and rollback procedures.
 
 ## Contributing
 

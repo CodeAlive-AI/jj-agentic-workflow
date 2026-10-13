@@ -31,7 +31,11 @@ recov() { # $1 label, $2 command
   ( cd "$d"; eval "${2//@OP@/$op}" ) >/dev/null 2>&1
   desc "$d-b" @
 }
-for m in "undo:jj undo" "op-restore:jj op restore @OP@"; do
+case "$(recov undo "jj undo")" in
+  *"real work"*) ok "jj 0.46 cross-workspace undo protects the co-worker" ;;
+  *) bad "cross-workspace undo damaged the co-worker; requires jj >= 0.46" ;;
+esac
+for m in "op-restore:jj op restore @OP@"; do
   case "$(recov "${m%%:*}" "${m#*:}")" in
     *"real work"*) bad "${m%%:*} left the co-worker intact — rule may be obsolete, re-check" ;;
     *) ok "${m%%:*} damages a co-worker (rule is necessary)" ;;

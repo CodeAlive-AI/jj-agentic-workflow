@@ -18,22 +18,29 @@ Refuses three shapes and prints what to run instead:
   * a target carrying a bookmark — abandoning it deletes that bookmark;
   * a target already reachable from a bookmark — that is landed history.
 Everything else (abandoning your own unlanded change) passes untouched.
-Fails open on any error: a guard that breaks the shell is worse than no guard.
+For a detected abandon, failed inspection refuses execution with a diagnostic.
+This is a command guard, not a sandbox or a complete shell parser.
 """
 import json, os, re, shlex, subprocess, sys
+from pathlib import Path
 
 EVENT = os.path.expanduser("~/.local/bin/jj-agent-event")
 SUBST = re.compile(r"\$\(|\$\{|\$[A-Za-z_]|`")
 
 
 def ev(*args):
-    subprocess.run([EVENT, *args], capture_output=True, timeout=5, check=False)
+    try:
+        subprocess.run([EVENT, *args], capture_output=True, timeout=5, check=False)
+    except OSError:
+        pass  # Telemetry must never prevent the guard's refusal.
 
 
 def jj(cwd, *args):
-    r = subprocess.run(["jj", "--ignore-working-copy", *args],
+    r = subprocess.run(["jj", "--ignore-working-copy", "--at-op=@", *args],
                        capture_output=True, text=True, timeout=15, cwd=cwd)
-    return r.stdout.strip() if r.returncode == 0 else ""
+    if r.returncode:
+        raise RuntimeError(r.stderr.strip() or "Cannot inspect jj target")
+    return r.stdout.strip()
 
 
 def abandon_targets(command):
@@ -87,13 +94,24 @@ def main():
     if data.get("tool_name") != "Bash":
         return 0
     command = (data.get("tool_input") or {}).get("command") or ""
+    if isinstance(command, list):
+        command = shlex.join(command)
     if "abandon" not in command:
         return 0
-    cwd = data.get("cwd") or "."
-    if not jj(cwd, "root"):
+    detected = list(abandon_targets(command))
+    if not detected:
         return 0
+    cwd = data.get("cwd") or "."
+    # Reject ambiguous shell routing instead of checking the wrong repository.
+    # A caller can use a direct jj command with its tool's explicit workdir.
+    if re.search(r"(?:^|[;&|])\s*cd\s|(?:^|\s)(?:-R|--repository)(?:=|\s)", command):
+        return refuse("abandon-ambiguous-root", "Run jj abandon directly with the tool cwd set to the target workspace; routing via cd/-R cannot be verified by this guard.")
+    directory = Path(cwd).resolve()
+    if not any((p / ".jj").is_dir() for p in [directory, *directory.parents]):
+        return 0
+    jj(cwd, "root")
 
-    for targets, segment in abandon_targets(command):
+    for targets, segment in detected:
         for target in targets:
             if SUBST.search(target):
                 return refuse("abandon-target-from-shell-substitution",
@@ -135,5 +153,6 @@ def main():
 
 try:
     sys.exit(main())
-except Exception:
-    sys.exit(0)
+except Exception as error:
+    print(f"jj abandon guard could not verify the target: {error}. Inspect and retry; the command was blocked.", file=sys.stderr)
+    sys.exit(2)

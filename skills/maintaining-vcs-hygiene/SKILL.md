@@ -32,16 +32,10 @@ without culture, each recreates half of the incidents these rules came from.
   git `git branch --no-merged` plus a reflog check for detached work. Sweep the *undescribed*
   too, wherever they sit — jj `jj log -r 'description(exact:"") & ~root()'` — because an
   unpushed range hides them until it is pushed (§4).
-- **A working copy is not evidence of unlanded work.** A workspace parked on an
-  already-landed commit presents exactly like a large uncommitted change: `status` lists
-  files, and a diff against its parent shows the whole change. Decide by ancestry, never by
-  appearance — jj `jj log -r '<rev> & ::<trunk>'`, git `git merge-base --is-ancestor <rev>
-  <trunk>` — and do it before forming any opinion about the work. Comparing its *contents*
-  against trunk answers a different question and answers it misleadingly: trunk holding a
-  newer version of the same files reads as "superseded duplicate" when the truth may be that
-  trunk was built from this very commit and moved on. The sweep revset above already encodes
-  this; the mistake is reaching a working copy by another route — a workspace listing, a
-  colleague's checkout — and judging it on its diff.
+- **A working copy is not evidence of unlanded work.** A workspace can sit on a landed
+  commit and show the whole change against its parent. Judge by ancestry (`<rev> & ::<trunk>`
+  in jj, `git merge-base --is-ancestor` in Git), not by a status listing or content comparison.
+  Newer trunk contents do not make an ancestor a disposable duplicate.
 
 ## 3. Descriptions carry intent
 
@@ -101,8 +95,11 @@ without culture, each recreates half of the incidents these rules came from.
   the destination first. Add an ignore rule only for output that must live in the checkout, and
   scope it narrowly: over-broad patterns (`bin/`, `*.so`) silently swallow real files such as test
   fixtures and vendored sources, and the loss surfaces only in CI or never.
-- Close what you opened: delete merged branches and bookmarks you created, remove finished
-  workspaces and scratch clones, drop stale remotes and bundles.
+- Close what you opened, within your ownership: delete your merged branches/bookmarks and
+  finish your assigned workspace. In jj use `jj-agent finish` before explicit `--remove`;
+  ignored files are not protected by snapshots. Never remove active or unmanaged workspaces.
+- A host `Stop` means the agent ended a turn, not that the workspace should be deleted.
+  Inspecting sessions and subagents must not land, park, or clean another writer's work.
 
 ## 6. Claims require evidence
 

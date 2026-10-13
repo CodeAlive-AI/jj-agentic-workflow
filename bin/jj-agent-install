@@ -1,0 +1,185 @@
+#!/usr/bin/env python3
+"""Install immutable hook releases, preserving unrelated settings and rollback copies."""
+import argparse
+import hashlib
+import json
+from pathlib import Path
+import re
+import shlex
+import shutil
+import sys
+import time
+import tomllib
+
+SOURCE = Path(__file__).resolve().parents[1]
+OLD = {"jj-abandon-guard.py", "jj-world-watch.py", "jj-session-end-check.py",
+       "jj-session-briefing.py", "jj-session.py"}
+
+
+def merge_hooks(document, runtime, host, project=False):
+    document = json.loads(json.dumps(document))
+    events = document.setdefault("hooks", {})
+    names = {"jj-worktree.py"} if project else OLD
+    for event, groups in list(events.items()):
+        kept = []
+        for group in groups:
+            handlers = [h for h in group["hooks"]
+                        if not any(Path(t).name in names for t in shlex.split(h.get("command", "")))]
+            if handlers:
+                kept.append({**group, "hooks": handlers})
+        events[event] = kept
+    scripts = ({"WorktreeCreate": "jj-worktree.py", "WorktreeRemove": "jj-worktree.py"}
+               if project else {"PreToolUse": "jj-abandon-guard.py", "PostToolUse": "jj-world-watch.py",
+                                **{e: "jj-session.py" for e in
+                                   ["SessionStart", "PostCompact", "SubagentStart", "Stop", "SubagentStop"]}})
+    for event, script in scripts.items():
+        group = {"hooks": [{"type": "command", "command": "python3 " + shlex.quote(str(runtime / "hooks" / script)),
+                             "timeout": 120 if project else 30}]}
+        if event in ("PreToolUse", "PostToolUse"):
+            group["matcher"] = "^Bash$" if host == "codex" else "Bash"
+        events.setdefault(event, []).append(group)
+    return document
+
+
+def enable_hooks(text):
+    parsed = tomllib.loads(text)
+    if parsed.get("features", {}).get("hooks") is True:
+        return text
+    lines = text.splitlines(keepends=True)
+    start = next((i for i, line in enumerate(lines) if re.match(r"\s*\[features\]\s*(#.*)?$", line)), None)
+    if start is None:
+        if "features" in parsed:
+            raise ValueError("Non-table features syntax: migrate it explicitly before installation")
+        text += "\n[features]\nhooks = true\n"
+    else:
+        end = next((i for i in range(start + 1, len(lines)) if lines[i].lstrip().startswith("[")), len(lines))
+        key = next((i for i in range(start + 1, end) if re.match(r"\s*hooks\s*=", lines[i])), None)
+        if key is None:
+            lines.insert(start + 1, "hooks = true\n")
+        else:
+            lines[key] = re.sub(r"(=\s*)false", r"\g<1>true", lines[key], count=1)
+        text = "".join(lines)
+    if tomllib.loads(text).get("features", {}).get("hooks") is not True:
+        raise ValueError("Unable to enable hooks without rewriting unrelated config")
+    return text
+
+
+def digest(path):
+    if path.is_symlink():
+        return "link:" + str(path.readlink())
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--target-home", type=Path, default=Path.home())
+    parser.add_argument("--project", type=Path, help="Explicit opt-in JJ project; never scan active repositories")
+    parser.add_argument("--project-only", action="store_true")
+    parser.add_argument("--rollback", type=Path, help="Restore one receipt, refusing files changed since installation")
+    args = parser.parse_args()
+    if args.rollback:
+        records = json.loads(args.rollback.read_text())
+        for item in records:
+            if digest(Path(item["path"])) != item["installed"]:
+                raise ValueError(f"Changed since installation; manual review required: {item['path']}")
+        for item in reversed(records):
+            path = Path(item["path"])
+            path.unlink(missing_ok=True)
+            if item.get("link"):
+                path.symlink_to(item["link"])
+            elif item.get("backup"):
+                shutil.copy2(item["backup"], path)
+        print("Restored settings and executable links; immutable releases retained.")
+        return
+    if args.project_only and not args.project:
+        raise ValueError("--project-only requires --project")
+    files = sorted(p for directory in ["bin", "hooks", "lib"] for p in (SOURCE / directory).rglob("*")
+                   if p.is_file() and "__pycache__" not in p.parts)
+    stamp = hashlib.sha256(b"".join(str(p.relative_to(SOURCE)).encode() + p.read_bytes() for p in files)).hexdigest()[:16]
+    home = args.target_home.expanduser().resolve()
+    runtime = home / ".local/share/jj-agentic-workflow/releases" / stamp
+    planned = {}
+    if not args.project_only:
+        for host, rel in [("codex", ".codex/hooks.json"), ("claude", ".claude/settings.json")]:
+            path = home / rel
+            current = json.loads(path.read_text()) if path.exists() else {}
+            planned[path] = json.dumps(merge_hooks(current, runtime, host), indent=2) + "\n"
+        path = home / ".codex/config.toml"
+        current = path.read_text() if path.exists() else ""
+        inline = set(tomllib.loads(current).get("hooks", {})) - {"state"}
+        if inline:
+            raise ValueError("Inline hook definitions exist; consolidate them before installing hooks.json")
+        planned[path] = enable_hooks(current)
+    if args.project:
+        project = args.project.resolve(strict=True)
+        if not (project / ".jj").is_dir():
+            raise ValueError("Project must be the exact JJ workspace root")
+        path = project / ".claude/settings.local.json"
+        current = json.loads(path.read_text()) if path.exists() else {}
+        for event in ["WorktreeCreate", "WorktreeRemove"]:
+            for group in current.get("hooks", {}).get(event, []):
+                if any("jj-worktree.py" not in h.get("command", "") for h in group["hooks"]):
+                    raise ValueError(f"Existing {event} integration must be reconciled explicitly")
+        planned[path] = json.dumps(merge_hooks(current, runtime, "claude", project=True), indent=2) + "\n"
+    # Validate every document before the first settings mutation.
+    for path, content in planned.items():
+        if path.suffix == ".json":
+            json.loads(content)
+        else:
+            tomllib.loads(content)
+    runtime.mkdir(parents=True, exist_ok=True)
+    for source in files:
+        target = runtime / source.relative_to(SOURCE)
+        if target.exists():
+            if target.read_bytes() != source.read_bytes():
+                raise ValueError(f"Immutable release modified: {target}")
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+    backup = home / ".local/state/jj-agent/installations" / str(time.time_ns())
+    backup.mkdir(parents=True, mode=0o700)
+    records = []
+    def save_before(path):
+        item = {"path": str(path)}
+        if path.is_symlink():
+            item["link"] = str(path.readlink())
+        elif path.exists():
+            copy = backup / str(len(records))
+            shutil.copy2(path, copy)
+            item["backup"] = str(copy)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        records.append(item)
+        return item
+    def receipt():
+        (backup / "receipt.json").write_text(json.dumps(records, indent=2) + "\n")
+    for path, content in planned.items():
+        if path.exists() and path.read_text() == content:
+            continue
+        item = save_before(path)
+        temporary = path.with_name(path.name + ".jj-agent-tmp")
+        temporary.write_text(content)
+        temporary.chmod(0o600)
+        temporary.replace(path)
+        item["installed"] = digest(path)
+        receipt()
+    if not args.project_only:
+        path = home / ".local/bin/jj-agent"
+        target = runtime / "bin/jj-agent"
+        if not path.is_symlink() or path.resolve() != target:
+            item = save_before(path)
+            path.unlink(missing_ok=True)
+            path.symlink_to(target)
+            item["installed"] = digest(path)
+            receipt()
+    receipt()
+    print(json.dumps({"runtime": str(runtime), "receipt": str(backup / "receipt.json"),
+                      "changed": [r["path"] for r in records],
+                      "next": "Restart hosts. Review/trust changed Codex command hooks with /hooks."}, indent=2))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError, KeyError) as error:
+        print(f"jj-agent-install: {error}", file=sys.stderr)
+        sys.exit(1)

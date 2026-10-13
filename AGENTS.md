@@ -1,14 +1,14 @@
 # Installing jj-agentic-workflow
 
 You are an agent asked to install this workflow on the current machine. Follow the steps
-in order — mechanisms before skills, skills before project docs. Ask the user before
-overwriting anything that already exists; never merge silently.
+in order — mechanisms before skills, skills before project docs. Back up existing settings and show the resulting changes. An explicit request to update this
+workflow authorizes scoped merges; preserve unrelated settings. Never migrate active workspaces.
 
 ## 0. Preconditions
 
-- `jj --version` ≥ 0.44. If jj is absent, ask the user before installing it.
+- `jj --version` ≥ 0.46; Git ≥ 2.42 for colocated workspaces. If jj is absent, ask the user before installing it.
 - Identify the host: Claude Code (`~/.claude/`), Codex (`~/.agents/`), or other. Skills go
-  to the host's user-level skills directory; hooks only apply on Claude Code.
+  to the host's user-level skills directory; common hooks support Codex and Claude Code.
 
 ## 1. Mechanisms
 
@@ -22,24 +22,28 @@ overwriting anything that already exists; never merge silently.
      revset (it would block their next push): run the revset in each active repository
      and report matches instead of silently installing.
 
-## 2. Hooks (Claude Code only)
+## 2. Host integration
 
-Copy `hooks/*.py` to `~/.claude/hooks/` and register them in `~/.claude/settings.json`:
-`jj-abandon-guard.py` on PreToolUse (matcher `Bash`), `jj-world-watch.py` on PostToolUse
-(matcher `Bash`), `jj-session-end-check.py` on Stop. All three fail open. The abandon guard
-is the only blocking one: it exists because `jj abandon` deletes bookmarks and cannot be
-wrapped by a jj alias, so on a host without hooks that rule stays prose.
+Run `python3 bin/jj-agent-install`. It installs an immutable common runtime and `jj-agent`,
+backs up touched settings, preserves unrelated hooks, and enables Codex hooks. Record its receipt.
+Validate both hook documents with the host validator. Review/trust changed Codex hooks through
+native `/hooks`; do not fabricate trust state. Restart agents after settings changes.
 
-**Ask the user first**, then switch off the host's own Git automation (background fetch,
-automatic worktrees, worktree cleanup, PR auto-merge) as far as its settings allow; back up each
-settings file. What each host allows and what stays on: "Agent-host Git automation" in
-`skills/working-with-jj/references/onboarding.md`.
+Only explicitly onboarded, inactive JJ projects get Claude WorktreeCreate/WorktreeRemove:
+`bin/jj-agent-install --project /absolute/root --project-only`. Never install lifecycle replacement
+hooks globally. Ensure `.workspaces/` and `.claude/settings.local.json` are ignored first.
+
+Read the host references in `skills/working-with-jj/references/`. Use pre-created colocated JJ
+workspaces as Local projects in Codex; native Git worktree handoff/archive are outside this workflow.
+Do not change unrelated host automation settings implicitly. Rollback uses the receipt and refuses
+concurrently edited files.
 
 ## 3. Skills
 
 Copy `skills/working-with-jj/` and `skills/maintaining-vcs-hygiene/` to the host's
 user-level skills directory. Keep directory names identical to the frontmatter `name`.
-If a skill with the same name exists, diff and ask — do not overwrite.
+Prefer existing canonical symlinks; update their source once. If an unrelated skill has the same
+name, reconcile it explicitly instead of replacing it.
 
 ## 4. Verify
 
@@ -47,11 +51,14 @@ Run the hazard suite in a scratch directory (it creates its own temporary repos,
 touches real ones):
 
 ```bash
+python3 -B tests/test_workspace_integration.py
+python3 -B tests/test_install.py
 bash tests/multi-writer-hazards.sh
 ```
 
-All checks must pass. If a hazard check *fails* on a newer jj, report it as "rule possibly
-obsolete on jj <version>", not as an installation error.
+All checks must pass. Investigate a changed hazard on newer jj and update both evidence and rule;
+do not call an unexplained failure a successful installation. Distinguish synthetic hook contracts
+from actual host dispatch. Do not launch an unavailable host.
 
 ## 5. Onboard the user's projects
 

@@ -55,7 +55,7 @@ Applied once per machine, not per repository:
   section (`abandon-unreachable-commits = false`, `private-commits` for `wip:`/`private:`
   prefixes).
 - `~/.local/bin/`: `jj-land` (guarded trunk move), `jj-agent-event` (guardrail event log),
-  `jj-agent-reflect` (reflection report).
+  `jj-agent-reflect` (reflection report), and `jj-agent` (owned workspace lifecycle).
 - Agent-host hooks where the host supports them: a world-watch hook (repository moved under
   the agent) and a session-end hook (no unlanded work at stop).
 - The agent host's own Git automation, switched off **with the user's approval** (next section).
@@ -73,18 +73,21 @@ bookmarks. Reproduced on 0.44.0 with a plain `git fetch` in a colocated reposito
 - local `main` already moved (landed, not yet pushed) → `main` becomes **conflicted** (`main??`),
   and every command that names `main` fails until someone reconciles it.
 
-Nobody asked for either, and the host that ran the fetch logs nothing. Ask the user, back up the
-settings file, then turn off what the host allows. Checked September 2026:
+Host integration is version-specific. Back up settings and modify only the requested scope.
+For current setup use [codex.md](codex.md) and [claude-code.md](claude-code.md):
 
-| Host | Can be turned off | Cannot be turned off |
-|---|---|---|
-| Codex App | worktree upstream refresh → `never`; automatic worktree cleanup; PR auto-merge (`allow_auto_merge: false`); run tasks and automations in **Local** mode, not Worktree | background `git status`/`diff` polling ([openai/codex#32986](https://github.com/openai/codex/issues/32986)) |
-| Claude Code Desktop | `"worktree": {"baseRef": "head"}` in `~/.claude/settings.json` — new worktrees start from local `HEAD`, no fetch of `origin` first | background `git fetch` on diff refresh ([anthropics/claude-code#84698](https://github.com/anthropics/claude-code/issues/84698)); the per-session worktree itself — use the `claude` CLI without `--worktree` where that matters |
+- Codex: enable and trust common hooks; use prepared colocated workspaces in Local mode.
+  Native Git worktree creation/handoff/archive are not our JJ lifecycle.
+- Claude: common user hooks; project-only WorktreeCreate/WorktreeRemove opt-in. Payload `cwd`
+  selects the actual workspace. Do not install replacement lifecycle hooks globally.
+- Keep active workspaces unchanged. An old non-colocated child can expose its parent's Git
+  root; report that mismatch and use a new colocated workspace for the next assigned task.
+- Dependency setup remains explicit in each project. VCS root agreement is not app readiness.
 
-Do not block `git fetch` by renaming remotes or wrapping `git`: that also breaks `jj git fetch`.
-What stays on is covered by `jj land`, which refuses a conflicted trunk and prints the rebase, and
-by the world-watch hook, which reports when a bookmark moves under the agent. Tell the user what remains on and that the apps need a
-restart. Re-check the open issues when a host updates.
+Do not wrap Git or rename remotes to block fetch; that can break `jj git fetch`. Observation
+reports bookmark changes but does not stop background Git writers. Review remaining host behavior
+on upgrades, and restart agents after hook/settings changes. A host that is unavailable can have
+its hook contracts tested, but must be reported as lacking live verification.
 
 ## The order matters
 

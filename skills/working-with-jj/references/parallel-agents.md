@@ -1,39 +1,27 @@
 # Parallel writers in one jj repository
 
 Read when more than one agent, session, or workspace writes to the same repository, or when
-diagnosing work that "disappeared". Every hazard below was reproduced on jj 0.44.0.
+diagnosing work that "disappeared". Historical hazards were reproduced on 0.44; the recovery
+guard and workspace lifecycle are retested on 0.46.
 
-## Operation rewind is repository-wide, so recover forward
+## JJ 0.46: workspace-aware undo is a guard, not full isolation
 
-The operation log is shared by every workspace, and an operation restores the whole repository
-view — not just the caller's part of it. Measured with agent A fixing its own mistake while agent
-B had done real work in another workspace since:
+JJ 0.46 records workspace metadata on new operations and refuses undo/redo when the target
+belongs to another workspace. The pilot confirms cross-workspace `jj undo` refuses and preserves
+the other writer. The historical destructive-undo observation below applied to 0.44/0.45.
 
-| A's recovery | A's own change | B's change |
-|---|---|---|
-| `jj undo` | mistake **survives** | **reverted** |
-| `jj op restore <A's own op>` | fixed | **reverted** |
-| `jj abandon @` | gone, as intended | intact |
-| `jj describe -m …` | corrected | intact |
+| Recovery | Result on 0.46 |
+|---|---|
+| `jj undo` targeting another workspace | Refused; other writer preserved |
+| `jj op restore <old-operation>` | Still rewinds shared repository state |
+| `jj describe` / scoped `jj abandon` | Forward change; other workspace preserved |
 
-`jj undo` is the worst case: it targets the repository's newest operation, which in a multi-writer
-repo belongs to whoever moved last, so it reports success while damaging someone else and leaving
-the caller's own mistake in place.
-
-Recover forward instead: read `jj op log` and `jj evolog` to find the lost state, then bring it
-forward with `jj new <lost-commit>`, `jj restore --from <rev>`, `jj describe`, or `jj abandon`.
-
-Operation rewind remains the right tool for structural damage (a stack rebased wrongly, a
-bookmark moved to the wrong side) — but only in a single-workspace repository, or after
-confirming no one else has operated since. jj does not record which workspace made an operation:
-by default every entry in `jj op log` carries the same `user@host`, so the check usually cannot be
-made from the log alone. A workspace can opt in with
-`jj config set --workspace operation.username "agent/<name>"`, which makes later forensics
-possible.
-
-The same reasoning forbids mutating commands under `--at-op`: they deliberately fork the operation
-log, and a fork that is later reconciled can drop bookmarks and commits out of the visible graph.
-`--at-op` is an inspection flag.
+Use forward recovery by default: inspect `jj op log` / `jj evolog`, then recover with
+`jj new <lost-commit>`, `jj restore --from <rev>`, or a scoped description/abandon.
+An explicit own-workspace undo requires operation inspection and exclusive ownership. Never
+force past the workspace guard. Old operations can lack metadata; two agents in one workspace
+share an identity. Neither case proves rewind safe. Keep `op restore` for exclusive maintenance.
+Mutating under `--at-op` forks the operation log; use it only for inspection in this workflow.
 
 ## A revision resolves when the command runs, not when you decided on it
 
@@ -73,7 +61,7 @@ Two consequences, in this order:
 one layer out, in the agent host: `hooks/jj-abandon-guard.py` refuses these three shapes on
 PreToolUse and prints the resolve-then-abandon commands. Recovery, if it already happened, is
 forward as always: `jj bookmark set <name> -r 'commit_id("<full id>")'` back onto the same commit,
-then rebase your own change onto it. Never `jj undo` — it would take the other writer with it.
+then rebase your own change onto it. Do not substitute a repository rewind for this scoped repair.
 
 ## A conflicted bookmark is not a usable name
 
@@ -131,7 +119,7 @@ change; `--ignore-working-copy` did not.
 The dangerous form is inspecting somebody else's workspace: a bare `jj status` there snapshots
 *their* tree into *their* change, and if their `@` is already an ancestor of trunk, the snapshot
 rewrites landed history. Always inspect other workspaces as
-`jj -R <repo> --ignore-working-copy <cmd>`.
+`jj -R <repo> --ignore-working-copy --at-op=@ <cmd>`.
 
 ## A deleted Git ref can delete file content
 
@@ -145,7 +133,11 @@ descendant is rebased — and `work.txt` is **gone from the descendant's tree**.
 This machine sets `false` globally. A repository that overrides it back to `true` reopens the
 loss channel.
 
-## Workspace creation lands on the wrong base quietly
+## Workspace creation needs an owned caller and explicit base
+
+Use `jj-agent prepare` for new assigned workspaces; see [workspace-lifecycle.md](workspace-lifecycle.md).
+JJ 0.46 `workspace add --ignore-working-copy` fails after partial creation. Normal creation
+snapshots the caller. Never invoke it in an active workspace you do not own.
 
 - Without `-r`, `jj workspace add` starts the new workspace at the *parents* of the creator's `@`.
   An agent that just created its task change and then spawns a workspace gets a base one commit

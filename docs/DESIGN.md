@@ -37,20 +37,33 @@ If your risk tolerance differs, keep the skills and guards and simply withhold l
 authorization in your project AGENTS.md; the session-end hook then forces `jj park`
 instead, which is the supervised model.
 
-## Trade-off: operation rewind is banned, not wrapped
+## Trade-off: native undo guard does not establish ownership
 
-`jj undo`/`op restore` could in principle be wrapped with a "single workspace only" check.
-We ban them in prose instead of wrapping, because jj does not record which workspace made
-an operation — the wrapper could not distinguish "safe to rewind" reliably, and a guard
-that sometimes lies is worse than a rule. Forward recovery is always available.
+JJ 0.46 records workspace metadata and refuses cross-workspace undo/redo. We retain forward
+recovery as the shared-repository default because `op restore`, older operations and two writers
+sharing a workspace remain outside that protection. The hazard suite now expects undo refusal.
+
+## Trade-off: a shared lifecycle with host adapters
+
+The runtime creates native colocated workspaces, checks root agreement, records ownership, and
+refuses cleanup of unaddressed work or ignored files. Creation explicitly acknowledges a caller
+snapshot: `workspace add --ignore-working-copy` fails partway on 0.46. A filesystem lock serializes
+our lifecycle calls, not arbitrary writers. Removal therefore still requires exclusive ownership.
+
+Host hooks live in content-addressed releases. Config merges preserve unrelated mechanisms and
+produce rollback receipts. Codex trust uses its native UI, never generated trust hashes. Claude
+creation hooks are project opt-in to avoid replacing the lifecycle of Git-only projects.
+
+Stop is a turn boundary, not deletion authorization. Only a managed workspace's main owner gets
+a finish reminder; inherited subagents and inspecting sessions do not land another writer's work.
 
 ## Trade-off: the abandon guard lives in the host, not in jj
 
 `jj abandon` deletes any bookmark pointing at the commit it removes, which makes it the one
 command that can move trunk without passing `jj land`. It cannot be wrapped where the other
 guards live: jj refuses aliases that shadow built-in commands. So the guard sits one layer
-out, as a PreToolUse hook on the agent host — which buys real enforcement on Claude Code and
-none at all on a host without hooks, or for a human typing the command directly. We took the
+out, as a PreToolUse hook on the agent host — which buys enforcement of detected commands on Codex and Claude Code, but
+none on a host without hooks, or for a human typing the command directly. We took the
 partial mechanism over pure prose because the failure it prevents is unrecoverable-looking
 (trunk gone, descendants rebased) and, in our own logs, recurrent.
 

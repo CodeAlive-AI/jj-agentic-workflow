@@ -3,8 +3,8 @@
 
 Agents are blind not by choice: they hold a snapshot taken minutes ago while
 other writers keep committing, landing and pushing. This hook makes the change
-arrive on its own. It is nearly free when nothing happened: the jj operation
-head is a filename, so an unchanged repo costs one directory listing.
+arrive on its own. The public CLI reads the operation head without snapshotting
+or merging operations, including in workspaces whose .jj/repo is a pointer file.
 
 On a real change it compares against the last state this session saw and speaks
 up only about things that invalidate an agent's plan:
@@ -16,14 +16,16 @@ Reports once per distinct state, never repeats itself.
 """
 import hashlib, json, os, subprocess, sys
 
-CACHE = os.path.expanduser("~/.cache/jj-world")
+CACHE = os.environ.get("JJ_WORLD_CACHE", os.path.expanduser("~/.cache/jj-world"))
 EVENT = os.path.expanduser("~/.local/bin/jj-agent-event")
 
 
 def jj(root, *args, timeout=10):
-    r = subprocess.run(["jj", "--ignore-working-copy", *args],
+    r = subprocess.run(["jj", "--ignore-working-copy", "--at-op=@", *args],
                        capture_output=True, text=True, timeout=timeout, cwd=root)
-    return r.stdout.strip() if r.returncode == 0 else ""
+    if r.returncode:
+        raise RuntimeError(r.stderr.strip() or "jj observation failed")
+    return r.stdout.strip()
 
 
 def find_root(cwd):
@@ -38,11 +40,9 @@ def find_root(cwd):
 
 
 def op_head(root):
-    d = os.path.join(root, ".jj", "repo", "op_heads", "heads")
-    try:
-        return ",".join(sorted(os.listdir(d)))
-    except OSError:
-        return ""
+    # .jj/repo is a pointer file in secondary workspaces. Use the public CLI;
+    # --at-op=@ also refuses ambiguous operation heads rather than merging them.
+    return jj(root, "op", "log", "-n", "1", "--no-graph", "-T", "id")
 
 
 def trunk_name(root):
@@ -58,7 +58,8 @@ def read_state(root):
         return None
     heads = [l for l in jj(root, "log", "-r", f'bookmarks(exact:"{name}")',
                            "--no-graph", "-T", 'commit_id ++ "\\n"').splitlines() if l]
-    remote = jj(root, "log", "-r", f"{name}@origin", "--no-graph", "-T", "commit_id")
+    remote = jj(root, "log", "-r", f'remote_bookmarks(exact:"{name}", exact:"origin")',
+                "--no-graph", "-T", "commit_id")
     st = {"trunk": name, "local": sorted(heads), "remote": remote, "rel": ""}
     if len(heads) == 1 and remote:
         local = heads[0]
@@ -101,8 +102,8 @@ def describe(old, new):
         return "medium", "concurrent-writer-moved-trunk", (
             f"Another writer moved '{name}' to {new['local'][0][:12]} while you were working. "
             f"Re-verify anything you concluded about what is landed. This repository has "
-            f"concurrent writers: rewinding operations (jj undo / op restore) would revert their "
-            f"work, and a bare jj command in their workspace would snapshot their tree. See "
+            f"concurrent writers: recover forward. JJ 0.46 rejects another workspace's undo, "
+            f"but does not isolate writers sharing a workspace or make op restore local. See "
             f"working-with-jj references/parallel-agents.md.")
     return None, None, None
 
@@ -131,16 +132,20 @@ def main():
     os.makedirs(CACHE, exist_ok=True)
     sev, rule, msg = describe(prev.get("state") if prev else None, new)
     json.dump({"op": op, "state": new}, open(path, "w"))
-    if not prev or not msg:
-        return 0                      # first sighting establishes the baseline
-    subprocess.run([EVENT, "world-watch-fired", f"rule={rule}",
-                    f"severity={sev}", f"repo={os.path.basename(root)}"],
-                   capture_output=True, timeout=5, check=False)
+    if not msg:
+        return 0                      # healthy first sighting establishes the baseline
+    try:
+        subprocess.run([EVENT, "world-watch-fired", f"rule={rule}",
+                        f"severity={sev}", f"repo={os.path.basename(root)}"],
+                       capture_output=True, timeout=5, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        pass  # Optional telemetry must not suppress the actual diagnostic.
     print(f"[repo state changed] {msg}", file=sys.stderr)
     return 2 if sev in ("high", "medium") else 0
 
 
 try:
     sys.exit(main())
-except Exception:
+except Exception as error:
+    print(f"[jj observation unavailable] {error}; do not assume the repository is unchanged.", file=sys.stderr)
     sys.exit(0)

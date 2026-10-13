@@ -2,6 +2,8 @@
 .DS_Store
 *.log
 .jj-lab/
+.workspaces/
+__pycache__/
 
 # Local skill-edit history; machine state, not methodology.
 .skill_edit_log.jsonl

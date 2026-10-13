@@ -5,95 +5,48 @@ description: Use Jujutsu safely in any jj-enabled repository. Use when changing 
 
 # Work with jj
 
-## Iron rules
+Baseline: **jj 0.46+**, **Git 2.42+** for colocated workspaces. Load
+`maintaining-vcs-hygiene` and any repository-specific companion alongside this skill.
 
-- Raw Git is read-only in a colocated repository; every VCS mutation goes through jj, non-interactively.
-- Run `jj status` after each jj mutation.
-- By session end every change is landed (`jj land`) or parked (`jj park <name>`); a floating
-  unlanded change is a defect, not a state. Landing your own finished stack on local trunk is the
-  default and needs no authorization; integrating other writers' work, pushing, releasing, or
-  deploying still requires explicit authorization.
-- A conflicted bookmark (`main??`, "Name `main` is conflicted") makes that name an ambiguous
-  revset: stop, reconcile it, and say so — never describe the graph as if the name resolved.
-  How, and why the Git side looks fine: [parallel-agents.md](references/parallel-agents.md).
-  Same for a `(divergent)` change, even though `main` still resolves.
-- After `jj land`, read its hanging-heads report: integrate, park, or report each item — never
-  ignore it.
-- "Committed to main" means landed **and** the repository's default checkout standing on it.
-  Each workspace has its own `@`, so `jj land` from `.workspaces/<task>` leaves the owner's
-  folder on the old commit and the file you just reported is not there. After landing, run
-  `jj new <trunk>` in the default checkout, then report. If its working copy holds someone's
-  uncommitted work (`jj --ignore-working-copy diff -r 'default@' --stat` is not empty), say so
-  instead of moving it.
-- If shared `@` holds a change you did not author, open your own change before editing files.
-- Never publish a tip that does not contain the local trunk bookmark: landed-but-unpublished
-  work exists exactly there, and pushing around it forks the shared trunk (a conflicted
-  bookmark for every other writer). Before `jj git push`, verify with
-  `jj log -r 'main & ~::<push-tip>'` — empty output or stop.
-- Land trunk with `jj land [<rev>]`, never raw `jj bookmark set main`: it enforces forward-only moves (a sideways move orphans the old line) and refuses conflicted stacks. If it refuses, follow the recovery it prints and accept rebase conflicts — conflicts are recoverable, orphaned lines get lost. `jj orphans` lists unreachable non-empty heads; run it when finishing multi-writer work.
-- `jj abandon` is the back door around every trunk guard: jj **deletes** bookmarks pointing at
-  an abandoned commit and rebases its descendants, so one command removes trunk and rewrites
-  landed history while reporting it like any success. Abandon only your own unlanded change,
-  and give it a full commit id you resolved and read in the same breath — never `@`, `@-` or a
-  revision captured earlier, because a revision resolves when the command runs and a shared
-  `@` moves between your commands.
-- Where more than one workspace exists, never rewind operations — `jj undo`, `jj redo` and
-  `jj op restore` all restore the *repository-wide* view and silently revert concurrent writers
-  (measured: `undo` left the caller's own mistake in place and reverted a co-worker's change;
-  `op restore` fixed the caller and still reverted the co-worker). Recover forward with
-  change-scoped commands instead — `jj describe`, `jj abandon`, `jj restore --from`, or
-  `jj new <lost-commit>` — which leave other workspaces untouched. For the same reason `--at-op`
-  is inspection-only; mutating under it forks the operation log and can drop bookmarks and
-  commits from the visible graph.
-- A revset that matches nothing returns empty, not an error, so a wrong query reads as "no such
-  commit"; judge ancestry with a predicate (`jj log -r 'A::B'`), never by eyeballing a listing.
-  Both traps and their exact forms: [parallel-agents.md](references/parallel-agents.md).
+## Establish ownership
 
-## Land, park, see (host-provided commands)
+Run `jj --ignore-working-copy --at-op=@ root` in the assigned directory. If it fails, do not
+apply this skill unless explicitly migrating a repository. Stay in the assigned write root.
+Never create a branch, worktree or workspace without a user request or launcher assignment.
+If another writer owns the checkout, inspect only; `jj new` there still moves their working copy.
 
-These wrappers exist on this machine; prefer them over raw bookmark commands.
+For an assigned new workspace use `jj-agent prepare <name> -r <full-base-id> --snapshot-caller`
+from an exclusively owned caller, then `jj-agent -R <new-root> doctor`. Creation snapshots the
+caller. Existing active workspaces stay unchanged. Doctor checks VCS roots, not dependencies;
+run the project's explicit setup and readiness checks in the new root.
 
-- `jj land [<rev>] [--to <bookmark>]` — move trunk to `<rev>` (default `@-`). Refuses: a
-  conflicted trunk, a sideways move, a target missing published `@origin` work, conflicted or
-  divergent commits, a `<rev>` that is not exactly one commit, a path in `land.forbidden`. On
-  refusal it prints what to run. After any land it lists the files the range added (read every
-  `WARN`) and heads hanging outside every bookmark: integrate, park, or report each.
-- `jj park <name> [<rev>]` — set `parked/<name>`. Positional arguments only, no flags. Default
-  revision: `@` when it is non-empty or described, else `@-`. Verify the printed commit id is
-  the change you meant.
-- `jj orphans` — non-empty heads unreachable from every bookmark; run when finishing
-  multi-writer work.
+Read [workspace-lifecycle.md](references/workspace-lifecycle.md) for prepare/finish and ownership,
+[codex.md](references/codex.md) for Codex, or [claude-code.md](references/claude-code.md) for Claude.
+Parallel writers need separately assigned roots. Pass the exact root to each delegate.
 
-## Establish the write root
+## Observe without changing state
 
-Run `jj root` from the intended repository. If it fails, do not apply this skill unless the task
-is explicitly migrating the repository to jj.
+Ordinary jj commands can snapshot files and merge operation heads. Inspect with
+`jj --ignore-working-copy --at-op=@ <command>`; never run bare commands in another writer's root.
+A failure to inspect is not evidence that nothing changed. For your own mutations, run `jj status`
+afterward to verify the result.
 
-Stay in the checkout or workspace where the task started or that the launcher assigned. Never
-switch to another checkout of the same repository while writing. Do not create branches, Git
-worktrees, or jj workspaces unless the user explicitly asks or a launcher assigns one. Any
-`jj workspace add` needs an explicit `-r <resolved commit id>`: without `-r` it starts at the
-*parents* of the creator's `@`, and with an ambiguous or conflicted name it registers the workspace
-anyway on an unintended base. Verify the new workspace's `@-` before working in it.
+Git is read-only in a colocated repository; mutations go through jj, non-interactively.
+Git HEAD normally tracks `@-`, not `@`, and is detached. Git UI status can show your entire current
+JJ change. Do not fix branch-dependent tools with `git checkout`; use a separately authorized
+scratch clone. JJ is authoritative for conflicted bookmarks and ancestry.
 
-In a colocated repository Git's HEAD is normally detached and tracks `@-`, not `@`, so every
-Git-side view is one commit behind your working copy and tooling that asks for the current
-branch (`git branch --show-current`, deploy or publish scripts) sees none and may refuse to run.
-Do not "fix" this with `git checkout`; run branch-dependent tooling from a scratch clone.
+A conflicted bookmark (`main??`) is ambiguous, and a divergent change has multiple commit
+versions. Stop and reconcile before integration or publication. Read
+[parallel-agents.md](references/parallel-agents.md). A revset matching nothing returns empty,
+not an error: check surprising absence a second way. Judge ancestry with `A::B`, not a listing.
 
-Load any repository-specific jj companion skill before proceeding, and `maintaining-vcs-hygiene`
-for the culture layer (litter, parking, handoff claims).
+## Describe and edit
 
-## Work non-interactively
+Describe intent before the first edit, keep one logical unit per change, and refine the message
+as understanding improves. Follow the attribution and description rules in `maintaining-vcs-hygiene`.
 
-jj has no read-only commands: `status`, `log`, `diff` and even `op log` first snapshot the working
-copy, absorbing whatever the filesystem holds (test output, coverage, editor backups) into the
-current change. Inspect with `jj --ignore-working-copy <cmd>` (add `--at-op=@` for the exact
-current operation), and never run a bare `jj` command inside a workspace you do not own.
-
-Use jj for every VCS mutation:
-
-```bash
+```sh
 jj describe -m "<intent>"
 # edit and test
 jj status
@@ -101,78 +54,71 @@ jj diff --git
 jj new -m "<next logical unit>"
 ```
 
-- Always pass messages explicitly; never open an editor, pager, TUI, or diff editor. Every
-  history command has a non-interactive form: `describe -m`, `commit -m`, `squash -m` or
-  `squash --use-destination-message`, `split -m` with filesets. If an editor opens anyway and
-  fails, the message text survives at the `*.jjdescription` path in the error; retry with the
-  flag, do not retype from memory.
-- Keep one logical change per jj change.
+Always supply messages: `describe -m`, `commit -m`, `squash -m` or
+`--use-destination-message`, `split -m` with filesets. Do not open an editor, pager or diff TUI.
+If an editor fails, recover the message from the reported `*.jjdescription` path.
+For prior intent use `jj file annotate <path>` then `jj show <change-id>`; read-only Git `log -L`
+is available for line-range history.
 
-## The description carries what the code cannot
+By default new non-ignored files enter the next snapshot. Establish narrow ignore rules before
+work starts. Ignoring an already tracked file does not untrack it: `jj file untrack <path>` keeps
+it on disk. A captured secret remains in evolution history after untracking; report the exposure
+and need for rotation, not a completed cleanup. See [secrets-and-litter.md](references/secrets-and-litter.md).
+If the new-file size limit blocks snapshots, follow the one-shot hint or deliberately configure
+`snapshot.max-new-file-size`; work is not recorded while snapshotting fails.
 
-In jj the description is a living field, not a post-hoc label: state intent at `jj new -m` and
-refine it with `jj describe -m` as understanding improves. What belongs in the first line and the
-body is `maintaining-vcs-hygiene` §3. The jj-specific rule is that a placeholder ("next") is
-acceptable only while the change is still empty — describe it before its first file edit lands,
-because undescribed work is invisible intent.
+## Land or park your work
 
-To find the decision behind a line, use `jj file annotate <path>`, then `jj show <change-id>`
-for the description body. Line-range history needs colocated read-only `git log -L` (legal).
+By session end your work must be landed or parked, with blockers reported. Landing your finished
+stack locally is the default unless project/user policy says otherwise. Integrating others' work,
+pushing, releasing or deploying needs explicit authorization. Inspectors do not finish an owner's work.
 
-## A stray file is committed before you notice
+- `jj land [<rev>] [--to <bookmark>]`: guarded forward-only trunk move; default revision `@-`.
+  Refuses conflicted trunk/stacks, divergent changes, sideways/backwards moves, missing published
+  ancestry, ambiguous targets and repository-forbidden files. Follow its scoped recovery hint;
+  do not bypass it with raw `jj bookmark set main`. Read every warning and hanging-heads report.
+- `jj park <name> [<rev>]`: names work `parked/<name>`. Positional arguments, no flags. Default
+  `@` when non-empty or described, otherwise `@-`. Verify the resulting commit ID.
+- `jj orphans`: non-empty heads unreachable from bookmarks. Integrate, park or report relevant
+  items; never silently discard another writer's heads.
 
-By default jj has no untracked state: every new file that is not ignored joins the current change the moment
-any jj command runs. Ignore rules therefore have to exist *before* work starts, and
-`.gitignore` is not retroactive — adding an already-tracked path to it does not untrack the file,
-and its later edits keep being snapshotted. Untrack with `jj file untrack <path>` (the file stays
-on disk).
+Landing moves a bookmark, not another workspace's files. Report the landing and write root
+separately. Never reset/move an active default checkout; a clean recorded commit does not prove
+its disk has no unsaved edits. In managed workspaces, run `jj-agent finish`; removal is a separate
+explicit `--remove` step that refuses ignored/untracked files. Stop is a turn boundary, not cleanup.
 
-Treat a captured secret as an exposed credential, not a tidy-up: after untracking, the value is
-still readable from that change's evolution history (`jj evolog`), so say so plainly and have the
-credential rotated. Never report the deletion as a fix. Details:
-[secrets-and-litter.md](references/secrets-and-litter.md).
+Before an authorized push, verify local trunk is contained in the exact push tip with
+`jj log -r 'main & ~::<push-tip>'`: empty output or stop. Use an explicit remote and bookmark;
+see [publishing.md](references/publishing.md). Do not assume the new default push revset matches
+project gates. Multi-remote publication is not enabled by this package.
 
-Adding a file larger than `snapshot.max-new-file-size` (default 1 MiB, e.g. vendored or
-generated sources) makes every jj command fail until resolved — and while snapshotting fails,
-new work is not being recorded, so the safety net is off. Follow the one-shot hint from the
-error, or raise the limit deliberately with `jj config set --repo snapshot.max-new-file-size`.
+## Recover forward
 
-## Recover and hand off
+Inspect operation/evolution history to locate lost work, then use scoped `jj new <lost-commit>`,
+`jj restore --from <rev>`, `jj describe`, or `jj abandon` to bring the intended state forward.
+Before destructive commands resolve and inspect the target, then pass its full commit ID.
+Do not reuse a stale revision variable or moving `@`/`@-` for abandonment.
 
-Inspect before recovery:
+`jj abandon` can delete bookmarks and rebase descendants, bypassing landing guards. Abandon only
+your own unlanded change, never bookmark-reachable history. The host guard covers detected direct
+shell invocations; it is not a shell sandbox or a substitute for ownership.
 
-```bash
-jj status
-jj diff --git
-jj op log
-jj log -r 'all() & ~::<trunk>'   # work no trunk reaches, including commits no bookmark names
-```
+JJ 0.46 records workspace metadata and refuses cross-workspace undo/redo. An intentional undo
+still requires inspecting the operation and confirming exclusive ownership. Never force past
+that refusal. Old operations may lack metadata; two writers in one workspace share an identity.
+`jj op restore` remains repository-wide and requires exclusive maintenance. Mutating under
+`--at-op` forks the operation log: use it only for inspection in this workflow.
 
-Recover forward. Read `jj op log` and `jj evolog` to *find* the state you lost, then bring it
-forward with change-scoped commands (`jj new <lost-commit>`, `jj restore --from <rev>`,
-`jj describe`, `jj abandon`). Rewinding operations is a whole-repository act: reserve
-`jj op restore <operation>` for a single-workspace repository, or when you have confirmed no other
-writer has operated since that operation — jj's operation log does not record which workspace made
-an entry, so in a shared repository you usually cannot establish that. Never `jj undo`.
-If a workspace is stale, another writer rewrote its working-copy commit: inspect `jj op log`
-to learn what happened before running `jj workspace update-stale`, because the update can
-materialise a recovery commit from disk and bury the original incident. Conflicts may live in
-commits, but do not integrate or push a conflicted stack.
+If stale, inspect the operation history before `jj workspace update-stale`: it may create a
+recovery commit from disk. Do not integrate or push conflicts. Detailed recovery evidence:
+[parallel-agents.md](references/parallel-agents.md); mixed changes:
+[history-cleanup.md](references/history-cleanup.md).
 
-At handoff, report the write root, checks run, conflicts, and remaining work, and identify the work
-three ways: **change ID** (survives rewrites — the logical identity), **full commit ID** (what the
-reader must actually find; squash and rebase replace it), and the **operation ID** the claim was
-read at. A report carrying only change IDs sends the next agent looking for a commit that no longer
-exists under that hash. Follow
-the repository-specific companion for integration, workspace cleanup, or push procedures.
+## Handoff and onboarding
 
-Load only the relevant reference:
+Report write root, checks, conflicts, remaining work, **change ID**, **full commit ID**, and
+**operation ID**. A change ID identifies the evolving change; the commit ID identifies the exact
+version; the operation identifies the observed repository state. Recheck before acting later.
 
-- More than one writer in the repository, or work that disappeared:
-  [parallel-agents.md](references/parallel-agents.md)
-- A stray file, litter, or a captured secret in a change:
-  [secrets-and-litter.md](references/secrets-and-litter.md)
-- Oversized or mixed changes: [history-cleanup.md](references/history-cleanup.md)
-- Authorized bookmark or remote work: [publishing.md](references/publishing.md)
-- Wiring a new machine or repository (what goes in CLAUDE.md/AGENTS.md vs config vs skills):
-  [onboarding.md](references/onboarding.md)
+For machine/project setup and where rules belong, read [onboarding.md](references/onboarding.md).
+Keep shared instructions in skills, host mechanisms in configuration, and project facts in AGENTS.md.
