@@ -11,7 +11,8 @@
 #   * the landing range contains a DIVERGENT change (one change id, several visible
 #     commits — trunk can end up on the twin that does not hold the work);
 #   * <rev> resolves to anything but exactly one revision;
-#   * a commit in the range touches a path in the repository's `land.forbidden` fileset.
+#   * a commit in the range touches a path in the repository's `land.forbidden` fileset;
+#   * the repository's `land.check` command fails on the target (run last, just before the move).
 # After a land it reports every file the range added, per commit (added-then-deleted too),
 # flagging secret- or scratch-shaped names and large files. Filename policy, not secret detection.
 # Every check reads before the final bookmark move; concurrent writers can still change
@@ -164,6 +165,44 @@ if [[ -n "$forbidden" ]]; then
         echo "If it held a credential, it is exposed once snapshotted — tell the user and rotate it." >&2
         exit 1
     fi
+fi
+
+# --- Guard 6: the repository's own check ----------------------------------
+# `land.check` is a shell command (repo config, like land.forbidden). It runs from
+# the workspace root with the target's full commit id appended as its argument and
+# JJ_LAND_TARGET, JJ_LAND_BASE (the bookmark's current commit) and JJ_LAND_BOOKMARK
+# in the environment. A non-zero exit refuses the land. There is no skip flag:
+# a failing check is fixed in the change, a wrong check is fixed in the repository.
+check=$(jj config get land.check 2>/dev/null || true)
+if [[ -n "$check" ]]; then
+    echo "jj land: running land.check on ${target:0:12} ..."
+    check_log=$(mktemp "${TMPDIR:-/tmp}/jj-land-check.XXXXXX")
+    set +e
+    (cd "$root" && JJ_LAND_TARGET="$target" JJ_LAND_BASE="$old" JJ_LAND_BOOKMARK="$bookmark" \
+        bash -c "$check"' "$@"' jj-land-check "$target") 2>&1 | tee "$check_log"
+    status=${PIPESTATUS[0]}
+    set -e
+    if [[ "$status" -ne 0 ]]; then
+        ev land-refused rule=land-check "status=$status"
+        echo "" >&2
+        echo "jj land: REFUSED — land.check failed on ${target:0:12} (exit $status); '$bookmark' did not move." >&2
+        echo "Last lines of its output:" >&2
+        tail -n 40 "$check_log" | sed 's/^/  /' >&2
+        echo "Fix the cause in the change and land again. Do not bypass the check; if the check" >&2
+        echo "itself is wrong, fix it in the repository (land.check = $check)." >&2
+        rm -f "$check_log"
+        exit 1
+    fi
+    rm -f "$check_log"
+    # The check can take minutes; another writer may have moved the bookmark meanwhile.
+    now=$(one_rev "$bookmark")
+    if [[ "$now" != "$old" && -z "$(jj log --ignore-working-copy -r "::$target & $now" --no-graph -T 'commit_id' 2>/dev/null)" ]]; then
+        ev land-refused rule=bookmark-moved-during-check
+        echo "jj land: REFUSED — '$bookmark' moved while land.check ran; rebase onto it and land again:" >&2
+        echo "  jj rebase -s 'roots(::$target & ~::$bookmark)' -d $bookmark" >&2
+        exit 1
+    fi
+    old=$now
 fi
 
 report_additions() {

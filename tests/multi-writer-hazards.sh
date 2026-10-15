@@ -211,5 +211,21 @@ if [[ "$OUT" == *REFUSED*secrets/k.txt* && "$(jj -R "$R" --ignore-working-copy l
   ok "a forbidden path refuses the land, even when a later commit deletes it"
 else bad "forbidden path not refused: $OUT"; fi
 
+say "11. land.check gates the move and sees the target"
+R=$(mk check)
+( cd "$R"; jj config set --repo land.check "'test \"\$(cat ../check-verdict)\" = pass && echo \"checked \$1 base=\$JJ_LAND_BASE\"'"
+  jj new main -m "checked work"; echo c > c.txt; jj status ) >/dev/null 2>&1
+MAIN0=$(jj -R "$R" --ignore-working-copy log -r main --no-graph -T commit_id)
+TARGET=$(jj -R "$R" --ignore-working-copy log -r @ --no-graph -T commit_id)
+echo fail > "$LAB/check-verdict"
+OUT=$( cd "$R"; "$LAND" @ 2>&1 )
+if [[ "$OUT" == *REFUSED*land.check* && "$(jj -R "$R" --ignore-working-copy log -r main --no-graph -T commit_id)" == "$MAIN0" ]]; then
+  ok "a failing land.check refuses the land and leaves trunk in place"
+else bad "failing land.check did not refuse: $OUT"; fi
+echo pass > "$LAB/check-verdict"
+OUT=$( cd "$R"; "$LAND" @ 2>&1 )
+[[ "$OUT" == *"checked $TARGET base=$MAIN0"* ]] && ok "land.check receives the target id and the base" || bad "land.check arguments wrong: $OUT"
+[ "$(desc "$R" main)" = "checked work" ] && ok "a passing land.check lets the land proceed" || bad "passing land.check blocked: $OUT"
+
 printf '\n\033[1mtotal: %d passed, %d failed\033[0m\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

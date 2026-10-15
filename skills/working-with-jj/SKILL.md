@@ -75,7 +75,8 @@ pushing, releasing or deploying needs explicit authorization. Inspectors do not 
 
 - `jj land [<rev>] [--to <bookmark>]`: guarded forward-only trunk move; default revision `@-`.
   Refuses conflicted trunk/stacks, divergent changes, sideways/backwards moves, missing published
-  ancestry, ambiguous targets and repository-forbidden files. Follow its scoped recovery hint;
+  ancestry, ambiguous targets, repository-forbidden files and a failing repository `land.check`
+  (a fix in the change, never a bypass). Follow its scoped recovery hint;
   do not bypass it with raw `jj bookmark set main`. Read every warning and hanging-heads report.
 - `jj park <name> [<rev>]`: names work `parked/<name>`. Positional arguments, no flags. Default
   `@` when non-empty or described, otherwise `@-`. Verify the resulting commit ID.

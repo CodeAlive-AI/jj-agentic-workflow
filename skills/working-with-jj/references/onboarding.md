@@ -41,6 +41,12 @@ Facts an agent cannot discover reliably, or that differ from defaults:
   session belongs in a change.
 - **Forbidden paths**, if any: the fact here, the mechanism in each clone's repository config
   (`jj config set --repo land.forbidden '<fileset>'`), which `jj land` refuses to land.
+- **Land check**, if any: the fact here, the command in each clone's repository config
+  (`jj config set --repo land.check "'<command>'"`, a TOML string). `jj land` runs it from the
+  workspace root with the target's full commit id appended and `JJ_LAND_TARGET`, `JJ_LAND_BASE`,
+  `JJ_LAND_BOOKMARK` set, and refuses the land on a non-zero exit. Have the command read the
+  checker from the target commit, not from a working copy that may be stale. Keep the setup
+  command in the repository so every clone can reproduce it.
 - A pointer to any repository-specific companion skill, loaded *in addition to* the two core
   skills, never instead of them.
 
