@@ -22,20 +22,28 @@ workflow authorizes scoped merges; preserve unrelated settings. Never migrate ac
      revset (it would block their next push): run the revset in each active repository
      and report matches instead of silently installing.
 
-## 2. Host integration: explicit commands only
+## 2. Host integration: explicit selection
 
-JJ agent hooks are retired as of 2026-10-16 after a Stop hook displaced a substantive agent
-answer with a landing reminder. Do not register, enable or trust JJ lifecycle/response hooks.
+The default installer adds no hooks. Completion-blocking JJ/Grok Stop hooks remain retired.
+A user may explicitly select read-only context and action-specific checks; do not revive the old
+shared `jj-session.py` handler, world watcher, abandon guard or unused SubagentStop implicitly.
 
-Run `uv run --no-project --python 3.14 --script bin/jj-agent-install`. It installs `jj-agent`
-and its library, removes old JJ registrations from existing user JSON configs, preserves unrelated
-settings, and records rollback copies. It does not enable host hooks or create host config files.
-`--project /absolute/root --project-only` only removes retired JJ project hook registrations.
-Never restore pre-retirement hook settings from an old receipt without a new explicit request.
+The selected profile is installed with:
+`uv run --no-project --python 3.14 --script bin/jj-agent-install --observational-hooks --codex-push-project /absolute/approved/project`.
+It adds SessionStart/PostCompact on both hosts, Claude-only attribution advice, and an explicitly
+project-scoped Codex push router. Existing sensitive-file and cloud setup hooks remain separate.
+The installer backs up changes and does not flip the global Codex switch. Disable unselected
+plugin/project hooks through native hook state before enabling Codex hooks, then review/trust only
+selected definitions through `/hooks`. Never fabricate trust hashes or change sandbox/permissions.
 
-Use pre-created colocated JJ workspaces as Local projects. Prepare, doctor, finish and cleanup
-are explicit commands. Complete VCS checks without replacing the requested answer. Keep active
-workspaces untouched and restart hosts after removing already-loaded hooks.
+Claude lifecycle is experimental: `--claude-lifecycle --project /absolute/root --project-only`.
+Its new implementation avoids caller snapshots and checks creator session/project before removal.
+Do not deploy it until the actual host can dispatch safe removal without forcing native checks.
+Claude 2.1.300's ExitWorktree failed before invoking removal in the live pilot, so both lifecycle
+subscriptions remain absent from ARAI. Never create an unpaired registration that restores Git cleanup.
+
+Use explicit prepare/doctor/finish meanwhile. Restart agents after settings changes. Active
+workspaces are never migrated or mass-reconfigured.
 
 ## 3. Skills
 

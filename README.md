@@ -90,7 +90,7 @@ Every rule in this workflow traces to one of those measured hazards or to a real
 | `bin/` | `jj-land`, `jj-agent`, `jj-agent-install`, event and reflection tools |
 | `config/jj-config-snippet.toml` | `[git]` safety settings and the `park`/`land`/`orphans` aliases |
 | `lib/` | Shared library for explicitly invoked workspace commands |
-| `hooks/` | Retired implementations retained for historical regression fixtures; not installed |
+| `hooks/` | Explicitly selected context/action handlers plus retired regression fixtures |
 | `tests/` | Hazard, lifecycle, hook-contract and installer/rollback tests in temporary repos |
 | `docs/DESIGN.md` | Design rationale and honest trade-offs |
 | `CONTRIBUTING.md` | What a new rule needs before it earns a place |
@@ -103,9 +103,10 @@ See [workspace lifecycle](skills/working-with-jj/references/workspace-lifecycle.
 [Codex integration](skills/working-with-jj/references/codex.md), and
 [Claude integration](skills/working-with-jj/references/claude-code.md).
 
-Skills share one canonical source across hosts. **JJ agent hooks were retired on 2026-10-16**
-after a Stop hook displaced a substantive answer. Installation never enables hooks. Use explicit
-commands and Local mode for prepared JJ workspaces.
+Skills share one canonical source across hosts. **Completion-blocking JJ hooks were retired on 2026-10-16**
+after a Stop hook displaced a substantive answer. The default installer adds no hooks. Explicit
+selection may add read-only context and action-specific checks; plugin subscriptions must be
+controlled separately before enabling Codex hooks. See the [selected-hook report](docs/SELECTED-HOOKS-2026-10-16.md).
 
 The [0.46 validation report](docs/VALIDATION-0.46.md) records installed versions, test evidence,
 host limitations and rollback procedures.

@@ -1,18 +1,25 @@
 # Claude Code integration
 
-JJ lifecycle and response hooks are retired as of 2026-10-16. Do not install WorktreeCreate,
-WorktreeRemove, SessionStart, world-watch, abandon or Stop handlers from this workflow.
-The installer only removes retired registrations and installs explicit commands.
+The selected user hooks are sensitive-file edit protection, read-only JJ context at SessionStart
+and PostCompact, and advisory description checks after Bash tools. ARAI's existing push gate and
+cloud setup stay project-scoped. Do not register Stop, SubagentStop, abandon or world-watch hooks.
 
-Use an explicitly assigned colocated workspace prepared with `jj-agent prepare`, verify matching
-roots with `jj-agent doctor`, then start Claude in that exact directory. An inherited working
-directory does not authorize a delegate to write; parallel writers need separately assigned roots.
-Do not request native `--worktree` / worktree isolation expecting it to invoke JJ.
+`jj-context.py` never claims a workspace. `jj-attribution.py` checks only the commit ID emitted in
+the successful direct JJ command's tool result; it never reads neighbouring `@-` by assumption or
+runs repository-provided checker code. It skips ambiguous/compound commands with an observable
+not-checked result where evidence is missing. All JJ inspection is non-snapshotting. Advice uses
+additionalContext with exit 0; it cannot block completion and never rewrites descriptions.
 
-Run setup and tests in the assigned root. Land or park your own work and invoke `jj-agent finish`
-explicitly. Removal is a separate authorized `--remove` step that checks ignored/untracked files.
-Complete these steps without replacing the user's substantive answer with a landing reminder.
+The lifecycle candidate `jj-claude-worktree.py` is not activated in ARAI. Its WorktreeCreate
+registers a child with full sparsity while ignoring the caller, then updates only the new child's
+stale working copy. Saved caller state is copied; unsaved caller files remain untouched. The
+manifest records the creating Claude session and host. Removal refuses another owner/project,
+unaddressed work and ignored/untracked files. It never infers disposal permission.
 
-The previous hook contracts remain historical fixtures, not a supported host integration. Existing
-sessions must restart to unload removed handlers. On this machine only the general sensitive-file
-edit protection remains user-level; project-specific push gates/cloud setup are separate policies.
+Live Claude 2.1.300 created the colocated child and received correct context without changing the
+caller. ExitWorktree(action=remove) could not check its state and refused before WorktreeRemove
+was dispatched, including with a local origin configured. Do not force past that refusal or pair
+a creation hook with native Git cleanup. Both registrations stay pending a host-compatible design.
+Use explicit `jj-agent prepare` and `finish --remove` meanwhile.
+
+A hook-contract test is not live dispatch evidence. Restart Claude after settings changes.

@@ -54,8 +54,10 @@ our lifecycle calls, not arbitrary writers. Removal therefore still requires exc
 
 On 2026-10-16 a JJ Stop hook displaced Astra's substantive methodology answer with a landing
 reminder. Ownership checks and successful command-contract tests did not prove answer integrity.
-The workflow therefore installs explicit commands only. It removes previous JJ registrations,
-never enables host hooks, and keeps copies for rollback. Historic hooks remain test fixtures.
+The default workflow therefore installs explicit commands only. A later user selection may add
+read-only context and tool-action checks, but never the retired completion handler. New handlers
+have no Stop branches, context observation never claims ownership, and description advice targets
+only a commit evidenced by the just-completed command. Historic hooks remain test fixtures.
 
 Completion checks belong in the task flow. A Stop event is a turn boundary, not authorization
 to substitute a final answer, land another session's work or delete a workspace. `jj abandon`

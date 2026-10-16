@@ -65,6 +65,42 @@ class InstallTest(unittest.TestCase):
             release = Path(json.loads(result.stdout)["runtime"])
             self.assertFalse((release / "hooks").exists())
 
+    def test_explicit_observation_profile_has_no_stop_and_preserves_switch(self):
+        with tempfile.TemporaryDirectory(prefix="jj-selected-install-") as temp:
+            home = Path(temp)
+            (home / ".codex").mkdir()
+            config = home / ".codex/config.toml"
+            config.write_text('[features]\nhooks = false\n')
+            result = subprocess.run([sys.executable, str(INSTALL), "--target-home", str(home),
+                                     "--observational-hooks"], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(tomllib.loads(config.read_text())["features"]["hooks"])
+            codex = json.loads((home / ".codex/hooks.json").read_text())["hooks"]
+            claude = json.loads((home / ".claude/settings.json").read_text())["hooks"]
+            self.assertEqual(set(codex), {"SessionStart", "PostCompact"})
+            self.assertEqual(set(claude), {"SessionStart", "PostCompact", "PostToolUse"})
+            runtime = Path(json.loads(result.stdout)["runtime"])
+            self.assertFalse((runtime / "hooks/jj-session.py").exists())
+            second = subprocess.run([sys.executable, str(INSTALL), "--target-home", str(home),
+                                     "--observational-hooks"], capture_output=True, text=True)
+            self.assertEqual(second.returncode, 0, second.stderr)
+            self.assertEqual(json.loads(second.stdout)["changed"], [])
+
+    def test_codex_push_profile_requires_an_explicit_project(self):
+        with tempfile.TemporaryDirectory(prefix="jj-project-hook-install-") as temp:
+            home = Path(temp) / "home"
+            project = Path(temp) / "project"
+            (project / ".jj").mkdir(parents=True)
+            result = subprocess.run([sys.executable, str(INSTALL), "--target-home", str(home),
+                "--observational-hooks", "--codex-push-project", str(project)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            data = json.loads((home / ".codex/hooks.json").read_text())["hooks"]
+            self.assertEqual(set(data), {"SessionStart", "PostCompact", "PreToolUse"})
+            handler = data["PreToolUse"][0]["hooks"][0]
+            self.assertIn("jj-push-gate.py", handler["command"])
+            self.assertIn(str(project), handler["command"])
+            self.assertNotIn("$(jj root)", handler["command"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

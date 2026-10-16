@@ -5,19 +5,23 @@ are not migrated, reset, claimed or removed by the installer.
 
 ## Prepare
 
-The caller must be exclusively yours. JJ 0.46 snapshots the caller during `workspace add`;
-`--ignore-working-copy` fails after partial creation and is not a safe workaround.
+Preparation defaults to saved JJ state and never snapshots the caller. It explicitly combines
+`workspace add --ignore-working-copy --sparse-patterns full --colocate` with `workspace update-stale`
+in the new metadata-only child. The plain default sparse-copy mode fails partway with ignored
+working-copy updates; no failed mode is retried as a hidden fallback.
 
 ```sh
-jj-agent prepare task-name -r <full-base-commit-id> --snapshot-caller
+jj-agent prepare task-name -r <full-base-commit-id>
 jj-agent -R /absolute/new/workspace doctor
 ```
 
-Default destination: `<caller>/.workspaces/<name>`. It must be ignored before creation.
-Alternatively pass `--destination /absolute/separate/path`. The wrapper resolves exactly one
-base before creating, locks its own lifecycle operations, uses `--colocate`, and verifies `@-`
-and matching Git/JJ roots. Partial errors retain evidence: inspect before retrying. The lock
-does not serialize arbitrary jj commands or other writers.
+Unsaved caller files are excluded. The child materializes the full tree, not inherited sparse
+patterns. For an explicitly owned caller only, `--snapshot-caller` deliberately requests the old
+snapshotting mode. The wrapper resolves one base, serializes its lifecycle calls and verifies the
+child's parent and Git/JJ roots. Partial errors retain evidence; inspect before retrying.
+
+Default destination: `<caller>/.workspaces/<name>`, ignored before creation. An explicit external
+`--destination` is also supported. The metadata lock does not serialize arbitrary writers.
 
 Work on the described initial change and its descendants. If you start an unrelated stack,
 park the previous one first. The lifecycle cannot infer ownership of unrelated orphaned changes.
@@ -31,7 +35,7 @@ The manifest in `.jj/jj-agent.json` records root, store, base, initial change an
 `--owner-session <id>` records an optional owner at creation. Without it the manifest remains
 unbound; there is no SessionStart auto-claim or automatic inspect-only notice. Establish ownership
 explicitly. Always pass the exact write root to delegates; parallel writers need separately
-assigned workspaces. Do not install JJ session/subagent hooks.
+assigned workspaces. Selected read-only context hooks do not acquire ownership or provide isolation.
 
 ## Finish
 

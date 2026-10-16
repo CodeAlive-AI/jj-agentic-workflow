@@ -101,8 +101,6 @@ def manifest(workspace):
 
 def prepare(cwd, name, revision, destination=None, session=None, snapshot_caller=False):
     version_check()
-    if not snapshot_caller:
-        raise Failure("Creation snapshots the caller. Use --snapshot-caller only in an exclusively owned workspace")
     workspace = root(cwd)
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", name):
         raise Failure("Workspace name must be 1–64 letters, digits, underscores or hyphens")
@@ -120,10 +118,16 @@ def prepare(cwd, name, revision, destination=None, session=None, snapshot_caller
     with lifecycle_lock(workspace):
         base = commit(workspace, revision)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        # JJ 0.46 requires working-copy updates even for workspace add. The caller
-        # explicitly authorized its snapshot; --ignore-working-copy fails halfway.
-        run(["jj", "workspace", "add", "--colocate", "--name", name,
+        # Explicit full sparsity avoids workspace-add's intermediate sparse-copy
+        # mutation. Creation can then ignore the caller and materialize only the
+        # newly owned child through update-stale. Never retry a failed mode.
+        flags = [] if snapshot_caller else ["--ignore-working-copy"]
+        run(["jj", *flags, "workspace", "add", "--sparse-patterns", "full", "--colocate", "--name", name,
                       "-r", base, "-m", f"Task: {name}", str(dest)], workspace)
+        if not snapshot_caller:
+            if any(p.name not in (".jj", ".git") for p in dest.iterdir()):
+                raise Failure(f"New workspace is not metadata-only; keep and inspect {dest}")
+            run(["jj", "workspace", "update-stale"], dest)
         run(["jj", "status"], dest)
         parent = commit(dest, "@-")
         if parent != base:

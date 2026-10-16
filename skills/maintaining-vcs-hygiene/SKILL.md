@@ -5,13 +5,8 @@ description: AI-native version-control culture for agents in git and jj reposito
 
 # Maintaining VCS hygiene
 
-Agents differ from human committers in three ways, and every rule here compensates one of them:
-agents lose context (compaction, restarts), they run in parallel with humans and other agents,
-and they generate volume cheaply.
-
-This skill is the culture layer; it pairs with `working-with-jj` for the command layer. Each
-works alone, but in a jj repository load both — culture without safe commands, or commands
-without culture, each recreates half of the incidents these rules came from.
+Use with `working-with-jj` for JJ commands. This skill covers ownership, history and delivery
+when agents lose context or share a repository with other writers.
 
 ## 1. The repository is a shared, addressed space
 
@@ -101,7 +96,8 @@ without culture, each recreates half of the incidents these rules came from.
 - A host `Stop` means the agent ended a turn, not that the workspace should be deleted.
   Inspecting sessions and subagents must not land, park, or clean another writer's work.
 - Keep completion checks explicit. Do not enforce landing through response/Stop hooks or replace
-  a substantive answer with a VCS reminder. This workflow's agent hooks are retired.
+  a substantive answer with a VCS reminder. Only explicitly selected observational/tool-action
+  hooks may run; completion-blocking hooks remain retired.
 
 ## 6. Claims require evidence
 

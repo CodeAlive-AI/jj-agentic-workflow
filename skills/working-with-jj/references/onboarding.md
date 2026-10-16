@@ -63,7 +63,7 @@ Applied once per machine, not per repository:
 - `~/.local/bin/`: `jj-land` (guarded trunk move), `jj-agent-event` (guardrail event log),
   `jj-agent-reflect` (reflection report), and `jj-agent` (owned workspace lifecycle).
 - Explicit `jj-agent` commands for workspace preparation, inspection and completion. JJ agent
-  hooks are retired; do not register completion or response handlers.
+  completion hooks are retired; register only explicitly selected read-only context/action checks.
 - The agent host's own Git automation, switched off **with the user's approval** (next section).
 
 ## Agent-host Git automation
@@ -82,10 +82,11 @@ bookmarks. Reproduced on 0.44.0 with a plain `git fetch` in a colocated reposito
 Host integration is version-specific. Back up settings and modify only the requested scope.
 For current setup use [codex.md](codex.md) and [claude-code.md](claude-code.md):
 
-- Codex: keep JJ hooks unregistered; use prepared colocated workspaces in Local mode.
+- Codex: enable only the selected read-only context and scoped push check; use prepared
+  colocated workspaces in Local mode. Disable unselected plugin hooks individually.
   Native Git worktree creation/handoff/archive are not our JJ lifecycle.
-- Claude: start in the prepared workspace; invoke lifecycle commands explicitly. Do not install
-  JJ lifecycle or response hooks.
+- Claude: start in the prepared workspace. Read-only context and advisory description checks
+  are optional by explicit selection. Automatic lifecycle remains pending the live-host issue.
 - Keep active workspaces unchanged. An old non-colocated child can expose its parent's Git
   root; report that mismatch and use a new colocated workspace for the next assigned task.
 - Dependency setup remains explicit in each project. VCS root agreement is not app readiness.

@@ -1,27 +1,25 @@
 # Codex integration
 
-JJ agent hooks were retired on 2026-10-16 after a Stop hook replaced a substantive answer with
-a landing reminder. Keep this workflow hook-free. Do not register SessionStart, Stop, world-watch,
-abandon or subagent handlers. The installer does not change `features.hooks` or trust state.
+Use only the user's selected hook subscriptions. Completion-blocking JJ/Grok Stop remains retired.
+The approved SessionStart/PostCompact handler `jj-context.py` observes root, commit, operation
+and Git/JJ agreement with `--ignore-working-copy --at-op=@`. It never snapshots files, writes
+ownership or handles Stop. The selected ARAI push router `jj-push-gate.py` inspects roots without
+snapshots and delegates actual publication checks only to that repository's existing push gate.
 
-On this machine Codex hooks are disabled with `[features].hooks = false`, including plugin hooks.
-Restart existing agents so they unload previously registered handlers. This does not change normal
-Codex approvals or sandbox settings.
+The old project hook command expanded `$(jj root)` before every shell tool. Keep that original
+subscription disabled; the scoped user-level router replaces it without editing active workspaces.
+Claude-only attribution advice must not be registered in Codex.
 
-## Start and finish a task
+Before enabling `[features].hooks`, disable unselected plugin subscriptions using native hook
+state. All five Warp hooks remain disabled. Review only the selected definitions through `/hooks`;
+new or modified untrusted hooks are skipped. Do not fabricate trust hashes. App/CLI native
+`hooks/list` must show the intended enabled/trusted set. Restart hosts after changing settings.
 
-Stay in the assigned root. Only when a new workspace is explicitly assigned, prepare it with
-`jj-agent prepare <name> -r <full-base-id> --snapshot-caller` from an exclusively owned caller.
-Run `jj-agent -R /absolute/workspace doctor`, then `codex -C /absolute/workspace` or open that
-folder as a Local project in the desktop app. Set up application dependencies explicitly.
+For a newly assigned workspace use `jj-agent prepare <name> -r <full-base-id>`, verify with doctor,
+then `codex -C /absolute/root` or open that folder as a Local project. Default preparation does not
+snapshot the caller; it checks out saved state into the child only. Dependencies remain explicit.
+Git views use detached HEAD at `@-`; JJ remains authoritative for bookmarks and conflicts.
 
-Native Git creation/handoff/archive are not verified JJ lifecycle operations. Git HEAD normally
-tracks `@-` and can show the current JJ change as a diff. Use JJ for bookmark/conflict/ancestry checks.
-
-Check state, land or park your own changes, and invoke `jj-agent finish [--remove]` explicitly.
-Do not move an active default checkout. Provide the substantive answer the user asked for;
-VCS details belong in a short relevant delivery note, not a substituted final response.
-
-Use read-only `jj --ignore-working-copy --at-op=@` observations when reassessing shared state.
-The explicit-command installer preserves unrelated settings and records rollback copies. Old
-receipts may contain hooks: do not restore them without a new explicit request.
+Land/park and `jj-agent finish [--remove]` remain explicit. Native Git create/handoff/archive are
+not established JJ lifecycle operations. Do not move an active default checkout or substitute a
+VCS reminder for the answer the user requested.

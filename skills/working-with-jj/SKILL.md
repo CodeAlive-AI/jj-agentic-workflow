@@ -15,9 +15,10 @@ apply this skill unless explicitly migrating a repository. Stay in the assigned 
 Never create a branch, worktree or workspace without a user request or launcher assignment.
 If another writer owns the checkout, inspect only; `jj new` there still moves their working copy.
 
-For an assigned new workspace use `jj-agent prepare <name> -r <full-base-id> --snapshot-caller`
-from an exclusively owned caller, then `jj-agent -R <new-root> doctor`. Creation snapshots the
-caller. Existing active workspaces stay unchanged. Doctor checks VCS roots, not dependencies;
+For an assigned new workspace use `jj-agent prepare <name> -r <full-base-id>`
+from the assigned caller, then `jj-agent -R <new-root> doctor`. Default preparation uses saved JJ
+state; it does not snapshot or copy unsaved caller files. Existing active workspaces stay unchanged.
+Doctor checks VCS roots, not dependencies;
 run the project's explicit setup and readiness checks in the new root.
 
 Read [workspace-lifecycle.md](references/workspace-lifecycle.md) for prepare/finish and ownership,
@@ -103,7 +104,8 @@ Do not reuse a stale revision variable or moving `@`/`@-` for abandonment.
 
 `jj abandon` can delete bookmarks and rebase descendants, bypassing landing guards. Abandon only
 your own unlanded change, never bookmark-reachable history. Inspect targets explicitly; JJ agent
-hooks have been retired and must not be installed or enabled by this workflow.
+completion/abandon hooks stay retired. Only explicitly selected read-only context hooks may be
+installed; they never claim ownership or block an answer.
 
 JJ 0.46 records workspace metadata and refuses cross-workspace undo/redo. An intentional undo
 still requires inspecting the operation and confirming exclusive ownership. Never force past

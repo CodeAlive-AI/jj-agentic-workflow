@@ -15,6 +15,42 @@ OLD = {"jj-abandon-guard.py", "jj-world-watch.py", "jj-session-end-check.py",
        "jj-session-briefing.py", "jj-session.py", "jj-worktree.py"}
 
 
+def add_selected_hooks(document, runtime, host, project=None, push_project=None):
+    document = json.loads(json.dumps(document))
+    events = document.setdefault("hooks", {})
+    scripts = ({"WorktreeCreate": "jj-claude-worktree.py", "WorktreeRemove": "jj-claude-worktree.py"}
+               if project else {"SessionStart": "jj-context.py", "PostCompact": "jj-context.py",
+                                **({"PostToolUse": "jj-attribution.py"} if host == "claude" else {})})
+    if not project and host == "codex" and push_project:
+        scripts["PreToolUse"] = "jj-push-gate.py"
+    replaced = set(scripts.values())
+    for event, groups in list(events.items()):
+        kept = []
+        for group in groups:
+            handlers = [h for h in group["hooks"] if not any(
+                Path(t).name in replaced for t in shlex.split(h.get("command", "")))]
+            if handlers:
+                kept.append({**group, "hooks": handlers})
+        if kept:
+            events[event] = kept
+        else:
+            events.pop(event, None)
+    for event, script in scripts.items():
+        command = shlex.join([sys.executable, str(runtime / "hooks" / script)])
+        if project:
+            command += " --project " + shlex.quote(str(project))
+        if script == "jj-push-gate.py":
+            command += " --project " + shlex.quote(str(push_project))
+        group = {"hooks": [{"type": "command", "command": command,
+                             "timeout": 900 if script == "jj-push-gate.py" else (120 if project else 20)}]}
+        if event == "PostToolUse":
+            group["matcher"] = "Bash"
+        if event == "PreToolUse":
+            group["matcher"] = "^Bash$"
+        events.setdefault(event, []).append(group)
+    return document
+
+
 def remove_workflow_hooks(document):
     document = json.loads(json.dumps(document))
     events = document.get("hooks", {})
@@ -45,6 +81,12 @@ def main():
     parser.add_argument("--target-home", type=Path, default=Path.home())
     parser.add_argument("--project", type=Path, help="Remove retired JJ hooks from this exact project only")
     parser.add_argument("--project-only", action="store_true")
+    parser.add_argument("--observational-hooks", action="store_true",
+                        help="Opt in to read-only JJ context on both hosts and Claude attribution advice")
+    parser.add_argument("--claude-lifecycle", action="store_true",
+                        help="Opt in to owned Claude create/remove on --project after a live pilot")
+    parser.add_argument("--codex-push-project", type=Path,
+                        help="Scope the selected Codex push checker to this repository")
     parser.add_argument("--rollback", type=Path, help="Restore one receipt, refusing files changed since installation")
     args = parser.parse_args()
     if args.rollback:
@@ -63,8 +105,19 @@ def main():
         return
     if args.project_only and not args.project:
         raise ValueError("--project-only requires --project")
+    if args.claude_lifecycle and not args.project:
+        raise ValueError("--claude-lifecycle requires --project")
+    if args.codex_push_project:
+        args.codex_push_project = args.codex_push_project.resolve(strict=True)
+        if not args.observational_hooks or not (args.codex_push_project / ".jj").is_dir():
+            raise ValueError("--codex-push-project requires --observational-hooks and an exact JJ root")
     files = sorted(p for directory in ["bin", "lib"] for p in (SOURCE / directory).rglob("*")
                    if p.is_file() and "__pycache__" not in p.parts)
+    # Ship only reviewed implementations, never the retired Stop/world-watch guards.
+    if args.observational_hooks or args.claude_lifecycle:
+        files += [SOURCE / "hooks" / name for name in
+                  ["jj-context.py", "jj-attribution.py", "jj-claude-worktree.py", "jj-push-gate.py"]]
+        files.sort()
     stamp = hashlib.sha256(b"".join(str(p.relative_to(SOURCE)).encode() + p.read_bytes() for p in files)).hexdigest()[:16]
     home = args.target_home.expanduser().resolve()
     runtime = home / ".local/share/jj-agentic-workflow/releases" / stamp
@@ -75,8 +128,14 @@ def main():
             if path.exists():
                 current = json.loads(path.read_text())
                 cleaned = remove_workflow_hooks(current)
+                if args.observational_hooks:
+                    cleaned = add_selected_hooks(cleaned, runtime, "codex" if ".codex" in path.parts else "claude",
+                                                 push_project=args.codex_push_project)
                 if cleaned != current:
                     planned[path] = json.dumps(cleaned, indent=2) + "\n"
+            elif args.observational_hooks:
+                planned[path] = json.dumps(add_selected_hooks({}, runtime,
+                    "codex" if ".codex" in path.parts else "claude", push_project=args.codex_push_project), indent=2) + "\n"
     if args.project:
         project = args.project.resolve(strict=True)
         if not (project / ".jj").is_dir():
@@ -85,8 +144,12 @@ def main():
         if path.exists():
             current = json.loads(path.read_text())
             cleaned = remove_workflow_hooks(current)
+            if args.claude_lifecycle:
+                cleaned = add_selected_hooks(cleaned, runtime, "claude", project=project)
             if cleaned != current:
                 planned[path] = json.dumps(cleaned, indent=2) + "\n"
+        elif args.claude_lifecycle:
+            planned[path] = json.dumps(add_selected_hooks({}, runtime, "claude", project=project), indent=2) + "\n"
     # Validate every document before the first settings mutation.
     for path, content in planned.items():
         if path.suffix == ".json":
@@ -140,7 +203,8 @@ def main():
     receipt()
     print(json.dumps({"runtime": str(runtime), "receipt": str(backup / "receipt.json"),
                       "changed": [r["path"] for r in records],
-                      "next": "Use jj-agent commands explicitly. No hooks installed or enabled."}, indent=2))
+                      "next": ("Review selected Codex hooks natively; disable unselected plugin hooks before enabling hooks."
+                               if args.observational_hooks else "No global hook switch was changed.")}, indent=2))
 
 
 if __name__ == "__main__":

@@ -54,12 +54,13 @@ class WorkspacePilot(unittest.TestCase):
             {"cwd": str(cwd), "hook_event_name": event, "session_id": session, **fields}),
             capture_output=True, text=True)
 
-    def test_prepare_requires_explicit_caller_snapshot_and_is_colocated(self):
+    def test_prepare_defaults_to_saved_caller_and_allows_explicit_snapshot(self):
         (self.repo / "unsaved.txt").write_text("caller work\n")
         old_commit = commit(self.repo, "@")
-        with self.assertRaisesRegex(Failure, "snapshots the caller"):
-            raw_prepare(self.repo, "child", "main")
+        safe = raw_prepare(self.repo, "safe", "main")
         self.assertEqual(commit(self.repo, "@"), old_commit)
+        self.assertTrue((safe / "base.txt").exists())
+        self.assertFalse((safe / "unsaved.txt").exists())
         child = prepare(self.repo, "child", "main")
         self.assertNotEqual(commit(self.repo, "@"), old_commit)
         self.assertTrue((self.repo / "unsaved.txt").exists())
