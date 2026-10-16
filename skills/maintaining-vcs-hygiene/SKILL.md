@@ -100,6 +100,8 @@ without culture, each recreates half of the incidents these rules came from.
   ignored files are not protected by snapshots. Never remove active or unmanaged workspaces.
 - A host `Stop` means the agent ended a turn, not that the workspace should be deleted.
   Inspecting sessions and subagents must not land, park, or clean another writer's work.
+- Keep completion checks explicit. Do not enforce landing through response/Stop hooks or replace
+  a substantive answer with a VCS reminder. This workflow's agent hooks are retired.
 
 ## 6. Claims require evidence
 

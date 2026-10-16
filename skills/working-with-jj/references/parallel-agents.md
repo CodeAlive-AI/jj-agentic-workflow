@@ -57,9 +57,9 @@ Two consequences, in this order:
    landed history, and in a shared repository it is usually not yours.
 
 `jj abandon` cannot be wrapped — jj refuses aliases that shadow built-in commands
-(`Cannot define an alias that overrides the built-in command 'abandon'`) — so the mechanism sits
-one layer out, in the agent host: `hooks/jj-abandon-guard.py` refuses these three shapes on
-PreToolUse and prints the resolve-then-abandon commands. Recovery, if it already happened, is
+(`Cannot define an alias that overrides the built-in command 'abandon'`) — so this workflow requires explicit
+resolve-and-inspect discipline. The former `hooks/jj-abandon-guard.py` is retired with the other
+agent hooks; it is not installed or claimed as enforcement. Recovery, if it already happened, is
 forward as always: `jj bookmark set <name> -r 'commit_id("<full id>")'` back onto the same commit,
 then rebase your own change onto it. Do not substitute a repository rewind for this scoped repair.
 

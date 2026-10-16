@@ -1,5 +1,9 @@
 # Package 1 validation — 2026-10-13
 
+Historical report: host hooks described below were removed on 2026-10-16 after a Stop hook
+displaced a substantive answer. The current installer is hook-free. Do not use this report
+to re-enable the retired integration.
+
 ## Installed
 
 - Homebrew JJ upgraded from 0.45.1 to **0.46.0**. The old keg remains available; no automatic

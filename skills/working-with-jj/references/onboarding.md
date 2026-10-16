@@ -18,7 +18,7 @@ Only cross-project invariants, stated in one line each with a pointer to the ski
 - "Never create branches, worktrees, or workspaces unless explicitly requested or assigned."
 
 That is the whole global entry — four bullets, no procedures. The skills carry the procedures;
-the hooks and wrappers carry the enforcement.
+explicit wrappers and configuration carry the enforcement.
 
 ## Per repository (`AGENTS.md` in the repo root)
 
@@ -62,8 +62,8 @@ Applied once per machine, not per repository:
   prefixes).
 - `~/.local/bin/`: `jj-land` (guarded trunk move), `jj-agent-event` (guardrail event log),
   `jj-agent-reflect` (reflection report), and `jj-agent` (owned workspace lifecycle).
-- Agent-host hooks where the host supports them: a world-watch hook (repository moved under
-  the agent) and a session-end hook (no unlanded work at stop).
+- Explicit `jj-agent` commands for workspace preparation, inspection and completion. JJ agent
+  hooks are retired; do not register completion or response handlers.
 - The agent host's own Git automation, switched off **with the user's approval** (next section).
 
 ## Agent-host Git automation
@@ -82,10 +82,10 @@ bookmarks. Reproduced on 0.44.0 with a plain `git fetch` in a colocated reposito
 Host integration is version-specific. Back up settings and modify only the requested scope.
 For current setup use [codex.md](codex.md) and [claude-code.md](claude-code.md):
 
-- Codex: enable and trust common hooks; use prepared colocated workspaces in Local mode.
+- Codex: keep JJ hooks unregistered; use prepared colocated workspaces in Local mode.
   Native Git worktree creation/handoff/archive are not our JJ lifecycle.
-- Claude: common user hooks; project-only WorktreeCreate/WorktreeRemove opt-in. Payload `cwd`
-  selects the actual workspace. Do not install replacement lifecycle hooks globally.
+- Claude: start in the prepared workspace; invoke lifecycle commands explicitly. Do not install
+  JJ lifecycle or response hooks.
 - Keep active workspaces unchanged. An old non-colocated child can expose its parent's Git
   root; report that mismatch and use a new colocated workspace for the next assigned task.
 - Dependency setup remains explicit in each project. VCS root agreement is not app readiness.
@@ -97,7 +97,7 @@ its hook contracts tested, but must be reported as lacking live verification.
 
 ## The order matters
 
-1. Machine mechanisms first (config, wrappers, hooks) — rules that exist only as prose get
+1. Machine mechanisms first (config and explicit wrappers) — rules that exist only as prose get
    violated under pressure.
 2. Skills second — they reference the mechanisms by name.
 3. AGENTS.md last — by then it only has to state facts, which is why it stays short.

@@ -28,10 +28,10 @@ Do not copy credential files, installed dependencies or ignored output from anot
 ## Own
 
 The manifest in `.jj/jj-agent.json` records root, store, base, initial change and owner session.
-`--owner-session <id>` binds ownership at creation; otherwise the first main SessionStart claims
-it. Open the intended writer first. A second session receives an inspect-only notice.
-SubagentStart does not claim ownership. Always pass the exact write root to delegates; parallel
-writers need separately assigned workspaces. Hooks advise/guard but do not form a sandbox.
+`--owner-session <id>` records an optional owner at creation. Without it the manifest remains
+unbound; there is no SessionStart auto-claim or automatic inspect-only notice. Establish ownership
+explicitly. Always pass the exact write root to delegates; parallel writers need separately
+assigned workspaces. Do not install JJ session/subagent hooks.
 
 ## Finish
 

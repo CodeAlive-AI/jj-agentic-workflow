@@ -5,7 +5,7 @@ A practical methodology for running coding agents — including several in paral
 other's work.
 
 It is not a plugin and not bound to any project. It is a set of **skills** (instructions
-agents load on demand), **mechanisms** (guarded wrappers, config, hooks that enforce the
+agents load on demand), **mechanisms** (guarded wrappers, config that enforces the
 rules the skills state), and **tests** that prove the hazards the rules guard against are
 real on the current jj version.
 
@@ -18,7 +18,7 @@ path) and say:
 > onboard my projects.
 
 [`AGENTS.md`](AGENTS.md) is a complete, agent-executable procedure: it installs the
-mechanisms and config, registers the hooks, places the skills, runs the hazard test suite
+mechanisms and config, retires old JJ hook registrations, places the skills, runs the test suite
 to verify the installation, and then onboards your repositories following
 [`skills/working-with-jj/references/onboarding.md`](skills/working-with-jj/references/onboarding.md)
 — which lives inside the skill, so an already-installed agent can re-onboard any new
@@ -40,7 +40,7 @@ neither:
   exist for a single human user; they dominate the moment several writers — agents and
   humans — share one repository. That focus is the whole point.
 - **It enforces instead of exhorting.** Rules that agents kept violating as prose were
-  moved into wrappers, config, and hooks; the skills only carry what cannot be mechanised.
+  moved into explicit wrappers and config; the skills only carry what cannot be mechanised.
 - **It self-verifies and self-corrects.** The test suite asserts the hazards are still
   real on your jj version, and the built-in reflection loop reviews recorded guard events
   to propose moving rules between layers — including deleting them.
@@ -73,7 +73,7 @@ Every rule in this workflow traces to one of those measured hazards or to a real
 1. **Config** — `abandon-unreachable-commits = false`, `private-commits` push refusal.
 2. **Mechanisms** — `jj land` (forward-only guarded trunk move), `jj park` (named parking),
    `jj orphans` (unreachable-heads sweep), `jj-agent-event` (guardrail event log).
-3. **Hooks** — the world moved under the agent; the session may not end with unlanded work.
+3. **Explicit completion** — check state and land/park within the task; no response/Stop hooks.
 4. **Skills** — `working-with-jj` (command layer) and `maintaining-vcs-hygiene` (culture
    layer). They recommend each other and work best as a pair, but each stands alone.
 5. **Reflection** — recorded guard events are periodically reviewed with one question:
@@ -89,7 +89,8 @@ Every rule in this workflow traces to one of those measured hazards or to a real
 | `skills/maintaining-vcs-hygiene/` | VCS culture skill + the reflection procedure |
 | `bin/` | `jj-land`, `jj-agent`, `jj-agent-install`, event and reflection tools |
 | `config/jj-config-snippet.toml` | `[git]` safety settings and the `park`/`land`/`orphans` aliases |
-| `hooks/` + `lib/` | Common Codex/Claude guards and project-scoped Claude workspace adapter |
+| `lib/` | Shared library for explicitly invoked workspace commands |
+| `hooks/` | Retired implementations retained for historical regression fixtures; not installed |
 | `tests/` | Hazard, lifecycle, hook-contract and installer/rollback tests in temporary repos |
 | `docs/DESIGN.md` | Design rationale and honest trade-offs |
 | `CONTRIBUTING.md` | What a new rule needs before it earns a place |
@@ -102,9 +103,9 @@ See [workspace lifecycle](skills/working-with-jj/references/workspace-lifecycle.
 [Codex integration](skills/working-with-jj/references/codex.md), and
 [Claude integration](skills/working-with-jj/references/claude-code.md).
 
-Skills share one canonical source across hosts. General hooks support Codex and Claude; lifecycle
-replacement is Claude project opt-in. Codex requires native hook trust and Local mode for prepared
-JJ workspaces. Synthetic Claude contract tests do not prove live Claude dispatch.
+Skills share one canonical source across hosts. **JJ agent hooks were retired on 2026-10-16**
+after a Stop hook displaced a substantive answer. Installation never enables hooks. Use explicit
+commands and Local mode for prepared JJ workspaces.
 
 The [0.46 validation report](docs/VALIDATION-0.46.md) records installed versions, test evidence,
 host limitations and rollback procedures.

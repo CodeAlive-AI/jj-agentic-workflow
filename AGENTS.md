@@ -8,7 +8,7 @@ workflow authorizes scoped merges; preserve unrelated settings. Never migrate ac
 
 - `jj --version` ≥ 0.46; Git ≥ 2.42 for colocated workspaces. If jj is absent, ask the user before installing it.
 - Identify the host: Claude Code (`~/.claude/`), Codex (`~/.agents/`), or other. Skills go
-  to the host's user-level skills directory; common hooks support Codex and Claude Code.
+  to the host's user-level skills directory; the workflow uses explicit commands in Codex and Claude Code.
 
 ## 1. Mechanisms
 
@@ -22,21 +22,20 @@ workflow authorizes scoped merges; preserve unrelated settings. Never migrate ac
      revset (it would block their next push): run the revset in each active repository
      and report matches instead of silently installing.
 
-## 2. Host integration
+## 2. Host integration: explicit commands only
 
-Run `python3 bin/jj-agent-install`. It installs an immutable common runtime and `jj-agent`,
-backs up touched settings, preserves unrelated hooks, and enables Codex hooks. Record its receipt.
-Validate both hook documents with the host validator. Review/trust changed Codex hooks through
-native `/hooks`; do not fabricate trust state. Restart agents after settings changes.
+JJ agent hooks are retired as of 2026-10-16 after a Stop hook displaced a substantive agent
+answer with a landing reminder. Do not register, enable or trust JJ lifecycle/response hooks.
 
-Only explicitly onboarded, inactive JJ projects get Claude WorktreeCreate/WorktreeRemove:
-`bin/jj-agent-install --project /absolute/root --project-only`. Never install lifecycle replacement
-hooks globally. Ensure `.workspaces/` and `.claude/settings.local.json` are ignored first.
+Run `uv run --no-project --python 3.14 --script bin/jj-agent-install`. It installs `jj-agent`
+and its library, removes old JJ registrations from existing user JSON configs, preserves unrelated
+settings, and records rollback copies. It does not enable host hooks or create host config files.
+`--project /absolute/root --project-only` only removes retired JJ project hook registrations.
+Never restore pre-retirement hook settings from an old receipt without a new explicit request.
 
-Read the host references in `skills/working-with-jj/references/`. Use pre-created colocated JJ
-workspaces as Local projects in Codex; native Git worktree handoff/archive are outside this workflow.
-Do not change unrelated host automation settings implicitly. Rollback uses the receipt and refuses
-concurrently edited files.
+Use pre-created colocated JJ workspaces as Local projects. Prepare, doctor, finish and cleanup
+are explicit commands. Complete VCS checks without replacing the requested answer. Keep active
+workspaces untouched and restart hosts after removing already-loaded hooks.
 
 ## 3. Skills
 

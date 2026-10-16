@@ -34,7 +34,7 @@ chose autonomous landing because:
   recoverable via `jj op log`.
 
 If your risk tolerance differs, keep the skills and guards and simply withhold landing
-authorization in your project AGENTS.md; the session-end hook then forces `jj park`
+authorization in your project AGENTS.md; the agent must explicitly park and report its work
 instead, which is the supervised model.
 
 ## Trade-off: native undo guard does not establish ownership
@@ -50,22 +50,16 @@ refuses cleanup of unaddressed work or ignored files. Creation explicitly acknow
 snapshot: `workspace add --ignore-working-copy` fails partway on 0.46. A filesystem lock serializes
 our lifecycle calls, not arbitrary writers. Removal therefore still requires exclusive ownership.
 
-Host hooks live in content-addressed releases. Config merges preserve unrelated mechanisms and
-produce rollback receipts. Codex trust uses its native UI, never generated trust hashes. Claude
-creation hooks are project opt-in to avoid replacing the lifecycle of Git-only projects.
+## Retired approach: host hooks
 
-Stop is a turn boundary, not deletion authorization. Only a managed workspace's main owner gets
-a finish reminder; inherited subagents and inspecting sessions do not land another writer's work.
+On 2026-10-16 a JJ Stop hook displaced Astra's substantive methodology answer with a landing
+reminder. Ownership checks and successful command-contract tests did not prove answer integrity.
+The workflow therefore installs explicit commands only. It removes previous JJ registrations,
+never enables host hooks, and keeps copies for rollback. Historic hooks remain test fixtures.
 
-## Trade-off: the abandon guard lives in the host, not in jj
-
-`jj abandon` deletes any bookmark pointing at the commit it removes, which makes it the one
-command that can move trunk without passing `jj land`. It cannot be wrapped where the other
-guards live: jj refuses aliases that shadow built-in commands. So the guard sits one layer
-out, as a PreToolUse hook on the agent host — which buys enforcement of detected commands on Codex and Claude Code, but
-none on a host without hooks, or for a human typing the command directly. We took the
-partial mechanism over pure prose because the failure it prevents is unrecoverable-looking
-(trunk gone, descendants rebased) and, in our own logs, recurrent.
+Completion checks belong in the task flow. A Stop event is a turn boundary, not authorization
+to substitute a final answer, land another session's work or delete a workspace. `jj abandon`
+still requires explicit target/ownership inspection; no agent hook enforcement is claimed.
 
 ## Trade-off: file checks at landing are policy, not detection
 

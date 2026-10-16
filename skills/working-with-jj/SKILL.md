@@ -86,7 +86,8 @@ pushing, releasing or deploying needs explicit authorization. Inspectors do not 
 Landing moves a bookmark, not another workspace's files. Report the landing and write root
 separately. Never reset/move an active default checkout; a clean recorded commit does not prove
 its disk has no unsaved edits. In managed workspaces, run `jj-agent finish`; removal is a separate
-explicit `--remove` step that refuses ignored/untracked files. Stop is a turn boundary, not cleanup.
+explicit `--remove` step that refuses ignored/untracked files. Completion is an explicit task step;
+do not install Stop or response hooks to enforce it. Answer the user's substantive request first.
 
 Before an authorized push, verify local trunk is contained in the exact push tip with
 `jj log -r 'main & ~::<push-tip>'`: empty output or stop. Use an explicit remote and bookmark;
@@ -101,8 +102,8 @@ Before destructive commands resolve and inspect the target, then pass its full c
 Do not reuse a stale revision variable or moving `@`/`@-` for abandonment.
 
 `jj abandon` can delete bookmarks and rebase descendants, bypassing landing guards. Abandon only
-your own unlanded change, never bookmark-reachable history. The host guard covers detected direct
-shell invocations; it is not a shell sandbox or a substitute for ownership.
+your own unlanded change, never bookmark-reachable history. Inspect targets explicitly; JJ agent
+hooks have been retired and must not be installed or enabled by this workflow.
 
 JJ 0.46 records workspace metadata and refuses cross-workspace undo/redo. An intentional undo
 still requires inspecting the operation and confirming exclusive ownership. Never force past
