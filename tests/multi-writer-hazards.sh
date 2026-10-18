@@ -227,5 +227,79 @@ OUT=$( cd "$R"; "$LAND" @ 2>&1 )
 [[ "$OUT" == *"checked $TARGET base=$MAIN0"* ]] && ok "land.check receives the target id and the base" || bad "land.check arguments wrong: $OUT"
 [ "$(desc "$R" main)" = "checked work" ] && ok "a passing land.check lets the land proceed" || bad "passing land.check blocked: $OUT"
 
+say "12. trunk moving during land.check: refused, unless the move stays inside land.recheck-exempt"
+# The check itself plays the parallel writer: on its first run it lands the commits
+# described in ../move-<name> from a second workspace, then passes. A counter file
+# shows whether the check ran again.
+mkmove() { # $1 name, $2 exempt fileset or "", $3 file our range writes -> repo path
+  local R; R=$(mk "move-$1")
+  ( cd "$R"
+    mkdir -p docs src; echo shared > docs/shared.md; echo code > src/app.txt
+    jj describe -m base2; jj new -m next; jj bookmark set main -r @-
+    jj workspace add --name other -r main "$R-other"
+    [ -n "$2" ] && jj config set --repo land.recheck-exempt "'$2'"
+    jj config set --repo land.check "'echo run >> ../count-$1; if [ -f ../move-$1 ]; then (cd ../$(basename "$R")-other && bash ../move-$1) >/dev/null 2>&1; rm -f ../move-$1; fi; true'"
+    jj new main -m "work"; mkdir -p "$(dirname "$3")"; echo ours >> "$3"; jj new -m "after work"; jj status ) >/dev/null 2>&1
+  rm -f "$LAB/count-$1"; echo "$R"
+}
+main_id() { jj -R "$1" --ignore-working-copy log -r main --no-graph -T commit_id; }
+checks() { grep -c run "$LAB/count-$1" 2>/dev/null || echo 0; }
+export JJ_AGENT_STATE="$LAB/events12"; mkdir -p "$JJ_AGENT_STATE"; EVLOG="$JJ_AGENT_STATE/events.jsonl"
+
+# a) docs-only move, exemption configured: lands without re-running the check.
+R=$(mkmove docs 'root-glob:"docs/**" | root-glob:"**/*.md"' src/feature.txt)
+cat > "$LAB/move-docs" <<'EOS'
+jj new main -m "docs one"; echo d1 > docs/one.md; jj new -m "docs two"; echo d2 > notes.md
+jj new -m tail; jj bookmark set main -r @-
+EOS
+OUT=$( cd "$R"; "$LAND" @- 2>&1 )
+if [ "$(desc "$R" main)" = "work" ] && [ "$(desc "$R" 'main-')" = "docs two" ] && [ "$(checks docs)" = 1 ]; then
+  ok "a docs-only move during the check: rebased and landed, check ran once"
+else bad "docs-only move not landed automatically (checks=$(checks docs)): $OUT"; fi
+[[ "$OUT" == *"land.check NOT re-run"*"docs two"* ]] && ok "the skip is printed with the commits it accepted" || bad "skip not reported: $OUT"
+grep -q '"rule":"recheck-skipped"' "$EVLOG" 2>/dev/null && ok "the skip is recorded as rule=recheck-skipped" || bad "skip not recorded in the event log"
+[ -z "$(jj -R "$R" --ignore-working-copy diff --from main- --to main --name-only -- '~root-glob:"src/**"')" ] \
+  && [ -n "$(jj -R "$R" --ignore-working-copy file list -r main -- 'root:"docs/one.md"')" ] \
+  && ok "the landed commit carries only its own change, on top of the docs" || bad "landed tree is wrong"
+[ "$(desc "$R" "@-")" = "work" ] && [ -z "$(jj -R "$R" --ignore-working-copy log -r '@ & ~(main::)' --no-graph -T commit_id)" ] \
+  && ok "the working copy above the range followed the rebase" || bad "working copy left behind the rebase"
+
+# b) a move that touches a path outside the fileset: today's refusal, nothing rewritten.
+R=$(mkmove code 'root-glob:"docs/**"' docs/mine.md)
+printf '%s\n' 'jj new main -m "code"; echo c >> src/app.txt; jj new -m tail; jj bookmark set main -r @-' > "$LAB/move-code"
+WORK0=$(jj -R "$R" --ignore-working-copy log -r @- --no-graph -T commit_id)
+OUT=$( cd "$R"; "$LAND" @- 2>&1 )
+if [[ "$OUT" == *REFUSED*"moved while land.check ran"*"src/app.txt"* ]] && [ "$(desc "$R" main)" = "code" ] \
+   && [ "$(jj -R "$R" --ignore-working-copy log -r @- --no-graph -T commit_id)" = "$WORK0" ]; then
+  ok "a move touching a non-exempt path refuses and rewrites nothing"
+else bad "non-exempt move not refused: $OUT"; fi
+grep -q '"reason":"non-exempt-path"' "$EVLOG" 2>/dev/null && ok "the refusal reason is recorded" || bad "refusal reason missing"
+
+# c) a docs-only move that would collide with the range: refused before any rebase.
+R=$(mkmove clash 'root-glob:"docs/**"' docs/shared.md)
+printf '%s\n' 'jj new main -m "docs edit"; echo theirs >> docs/shared.md; jj new -m tail; jj bookmark set main -r @-' > "$LAB/move-clash"
+WORK0=$(jj -R "$R" --ignore-working-copy log -r @- --no-graph -T commit_id)
+OUT=$( cd "$R"; "$LAND" @- 2>&1 )
+if [[ "$OUT" == *REFUSED*"docs/shared.md"* ]] && [ "$(desc "$R" main)" = "docs edit" ] \
+   && [ "$(jj -R "$R" --ignore-working-copy log -r @- --no-graph -T commit_id)" = "$WORK0" ] \
+   && [ -z "$(jj -R "$R" --ignore-working-copy log -r 'conflicts()' --no-graph -T commit_id)" ]; then
+  ok "a move that could conflict with the range refuses and rewrites nothing"
+else bad "conflicting move not refused cleanly: $OUT"; fi
+
+# d) no land.recheck-exempt: today's refusal even for a docs-only move.
+R=$(mkmove none '' src/feature.txt)
+printf '%s\n' 'jj new main -m "docs only"; echo d > docs/one.md; jj new -m tail; jj bookmark set main -r @-' > "$LAB/move-none"
+OUT=$( cd "$R"; "$LAND" @- 2>&1 )
+if [[ "$OUT" == *REFUSED*"moved while land.check ran"*"not set"* ]] && [ "$(desc "$R" main)" = "docs only" ]; then
+  ok "without land.recheck-exempt a moved trunk still refuses"
+else bad "no-config move not refused: $OUT"; fi
+
+# e) a rename out of a protected path into the fileset is not docs-only.
+R=$(mkmove rename 'root-glob:"docs/**"' src/feature.txt)
+printf '%s\n' 'jj new main -m "move code to docs"; mv src/app.txt docs/app.txt; jj new -m tail; jj bookmark set main -r @-' > "$LAB/move-rename"
+OUT=$( cd "$R"; "$LAND" @- 2>&1 )
+[[ "$OUT" == *REFUSED*"src/app.txt"* ]] && ok "a rename out of a protected path refuses" || bad "rename out of a protected path accepted: $OUT"
+unset JJ_AGENT_STATE
+
 printf '\n\033[1mtotal: %d passed, %d failed\033[0m\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

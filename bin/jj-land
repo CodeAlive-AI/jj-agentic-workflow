@@ -12,7 +12,10 @@
 #     commits — trunk can end up on the twin that does not hold the work);
 #   * <rev> resolves to anything but exactly one revision;
 #   * a commit in the range touches a path in the repository's `land.forbidden` fileset;
-#   * the repository's `land.check` command fails on the target (run last, just before the move).
+#   * the repository's `land.check` command fails on the target (run last, just before the move);
+#   * the trunk bookmark moved while `land.check` ran — unless the repository opted in with
+#     `land.recheck-exempt` (a fileset) and the move, the automatic rebase onto it and the
+#     resulting tree all stay inside that fileset (see Guard 7).
 # After a land it reports every file the range added, per commit (added-then-deleted too),
 # flagging secret- or scratch-shaped names and large files. Filename policy, not secret detection.
 # Every check reads before the final bookmark move; concurrent writers can still change
@@ -147,9 +150,10 @@ fi
 # --- Guard 5: paths this repository forbids --------------------------------
 root=$(jj workspace root 2>/dev/null || pwd)
 forbidden=$(jj config get land.forbidden 2>/dev/null || true)
-if [[ -n "$forbidden" ]]; then
-    hits=""
-    for c in $(jj log --ignore-working-copy -r "$old..$target" --no-graph -T 'commit_id ++ "\n"' 2>/dev/null); do
+check_forbidden() { # $1 base, $2 tip: refuse when any commit in base..tip touches land.forbidden
+    [[ -z "$forbidden" ]] && return 0
+    local hits="" c out
+    for c in $(jj log --ignore-working-copy -r "$1..$2" --no-graph -T 'commit_id ++ "\n"' 2>/dev/null); do
         if ! out=$(cd "$root" && jj diff --ignore-working-copy -r "commit_id(\"$c\")" --summary -- "$forbidden" 2>/dev/null); then
             echo "jj land: REFUSED — land.forbidden is not a valid fileset: $forbidden" >&2
             exit 1
@@ -165,7 +169,8 @@ if [[ -n "$forbidden" ]]; then
         echo "If it held a credential, it is exposed once snapshotted — tell the user and rotate it." >&2
         exit 1
     fi
-fi
+}
+check_forbidden "$old" "$target"
 
 # --- Guard 6: the repository's own check ----------------------------------
 # `land.check` is a shell command (repo config, like land.forbidden). It runs from
@@ -194,13 +199,123 @@ if [[ -n "$check" ]]; then
         exit 1
     fi
     rm -f "$check_log"
+    checked="$target"
+
+    # --- Guard 7: trunk moved while the check ran ---------------------------
     # The check can take minutes; another writer may have moved the bookmark meanwhile.
-    now=$(one_rev "$bookmark")
-    if [[ "$now" != "$old" && -z "$(jj log --ignore-working-copy -r "::$target & $now" --no-graph -T 'commit_id' 2>/dev/null)" ]]; then
-        ev land-refused rule=bookmark-moved-during-check
+    # By default that refuses: the checked tree is not the tree that would land.
+    # `land.recheck-exempt` (repo config, a fileset like land.forbidden) opts in to one
+    # exception: when every commit that arrived on trunk touches only paths inside the
+    # fileset, the landing range is rebased onto the new trunk without re-running the
+    # check, provided the rebase cannot conflict and the rebased tree differs from the
+    # checked tree only inside the fileset. Whatever the check could have seen outside
+    # the fileset is then byte-for-byte what it did see. The bookmark is re-read after
+    # each rebase; a further move repeats the whole verification (bounded), and the
+    # final `jj bookmark set` itself refuses a move that is no longer forward.
+    exempt=$(jj config get land.recheck-exempt 2>/dev/null || true)
+    contains() { [[ -n "$(jj log --ignore-working-copy -r "::$1 & $2" --no-graph -T 'commit_id' 2>/dev/null)" ]]; }
+    moved_refuse() { # $1 reason code, $2 explanation, [$3 "rebased" when the range was already rebased]
+        ev land-refused rule=bookmark-moved-during-check "reason=$1"
         echo "jj land: REFUSED — '$bookmark' moved while land.check ran; rebase onto it and land again:" >&2
-        echo "  jj rebase -s 'roots(::$target & ~::$bookmark)' -d $bookmark" >&2
+        echo "  ($2)" >&2
+        if [[ "${3:-}" == rebased ]]; then
+            echo "Your range is already rebased onto ${old:0:12}; its tip is now ${target:0:12}. Land that:" >&2
+            echo "  jj land 'commit_id(\"$target\")'" >&2
+        else
+            echo "  jj rebase -s 'roots(::$target & ~::$bookmark)' -d $bookmark" >&2
+        fi
         exit 1
+    }
+    skipped_moves=0; skipped_commits=0; skipped_report=""
+    now=$(one_rev "$bookmark")
+    while [[ "$now" != "$old" ]] && ! contains "$target" "$now"; do
+        [[ -z "$exempt" ]] && moved_refuse no-exemption "land.recheck-exempt is not set for this repository"
+        [[ "$skipped_moves" -ge 5 ]] && moved_refuse too-many-moves "it kept moving during 5 automatic rebases"
+        [[ -z "$now" ]] && moved_refuse bookmark-gone "'$bookmark' no longer resolves to one revision"
+        contains "$now" "$old" \
+            || moved_refuse not-forward "'$bookmark' now points at ${now:0:12}, which does not descend from ${old:0:12}"
+        [[ -n "$(jj log --ignore-working-copy -r "($old..$now) & conflicts()" --no-graph -T 'commit_id' 2>/dev/null)" ]] \
+            && moved_refuse moved-conflicted "commits that arrived on '$bookmark' contain conflicts"
+        # Every commit that arrived touches only exempt paths (a rename out of a
+        # protected path shows its source under the complement), and so does their sum.
+        outside=""
+        for c in $(jj log --ignore-working-copy -r "$old..$now" --no-graph -T 'commit_id ++ "\n"' 2>/dev/null); do
+            if ! out=$(cd "$root" && jj diff --ignore-working-copy -r "commit_id(\"$c\")" --name-only -- "~($exempt)" 2>/dev/null); then
+                moved_refuse invalid-fileset "land.recheck-exempt is not a valid fileset: $exempt"
+            fi
+            [[ -n "$out" ]] && outside+=$(printf '%s\n' "$out" | head -5 | sed "s/^/    ${c:0:12} /")$'\n'
+        done
+        if [[ -z "$outside" ]]; then
+            outside=$(cd "$root" && jj diff --ignore-working-copy --from "commit_id(\"$old\")" --to "commit_id(\"$now\")" \
+                --name-only -- "~($exempt)" 2>/dev/null | head -5 | sed 's/^/    (sum) /')
+        fi
+        if [[ -n "$outside" ]]; then
+            ev land-refused rule=bookmark-moved-during-check reason=non-exempt-path
+            echo "jj land: REFUSED — '$bookmark' moved while land.check ran; rebase onto it and land again:" >&2
+            echo "  (the move touches paths outside land.recheck-exempt = $exempt:)" >&2
+            printf '%s\n' "$outside" >&2
+            echo "  jj rebase -s 'roots(::$target & ~::$bookmark)' -d $bookmark" >&2
+            exit 1
+        fi
+        # Only a range rooted directly on the old trunk is rebased: replacing that one
+        # parent cannot drop a merge parent or a side line.
+        root_parents=$(jj log --ignore-working-copy -r "roots($old..$target)" --no-graph \
+            -T 'parents.map(|p| p.commit_id()).join(",") ++ "\n"' 2>/dev/null | sort -u)
+        [[ "$root_parents" != "$old" ]] && moved_refuse range-shape "the landing range is not rooted solely on ${old:0:12}"
+        # A path-level merge cannot conflict when the two sides touch disjoint paths and
+        # neither side's path is a directory of the other's.
+        ours=$(cd "$root" && jj diff --ignore-working-copy --from "commit_id(\"$old\")" --to "commit_id(\"$target\")" --name-only 2>/dev/null)
+        theirs=$(cd "$root" && jj diff --ignore-working-copy --from "commit_id(\"$old\")" --to "commit_id(\"$now\")" --name-only 2>/dev/null)
+        overlap=$(awk 'NR==FNR { if ($0 != "") { o[$0]=1; p=$0; while (sub(/\/[^\/]*$/, "", p)) d[p]=1 } next }
+            $0 != "" { if (($0 in o) || ($0 in d)) { print; next }
+                       p=$0; while (sub(/\/[^\/]*$/, "", p)) if (p in o) { print $0; break } }' \
+            <(printf '%s\n' "$ours") <(printf '%s\n' "$theirs") | head -5)
+        [[ -n "$overlap" ]] && moved_refuse overlapping-paths "the move and your range both touch: $(echo $overlap)"
+
+        cid=$(jj log --ignore-working-copy -r "commit_id(\"$target\")" --no-graph -T 'change_id' 2>/dev/null)
+        n_range=$(count_rev "$old..$target")
+        echo "jj land: '$bookmark' moved ${old:0:12} -> ${now:0:12} during land.check; the move stays inside"
+        echo "         land.recheck-exempt, so the range is rebased onto it without re-running the check."
+        if ! (cd "$root" && jj rebase -s "roots($old..$target)" -d "commit_id(\"$now\")"); then
+            moved_refuse rebase-failed "the automatic rebase onto ${now:0:12} failed"
+        fi
+        moved_old=$old; old=$now
+        n_new=$(count_rev "change_id(\"$cid\") & ($now)::")
+        if [[ "$n_new" -ne 1 ]]; then
+            ev land-refused rule=bookmark-moved-during-check reason=rebased-target-ambiguous
+            echo "jj land: REFUSED — after rebasing onto ${now:0:12}, change $cid has $n_new visible versions above it." >&2
+            echo "Inspect with: jj log -r 'change_id(\"$cid\")'; then land the right one." >&2
+            exit 1
+        fi
+        target=$(one_rev "change_id(\"$cid\") & ($now)::"); rev="commit_id(\"$target\")"
+        # Re-verify everything about the rebased range before it can land.
+        [[ -n "$(jj log --ignore-working-copy -r "($now..$target) & conflicts()" --no-graph -T 'commit_id' 2>/dev/null)" ]] \
+            && moved_refuse rebase-conflicted "the rebased range has conflicts" rebased
+        [[ -n "$(jj log --ignore-working-copy -r "($now..$target) & divergent()" --no-graph -T 'commit_id' 2>/dev/null)" ]] \
+            && moved_refuse rebase-divergent "the rebased range contains a divergent change" rebased
+        [[ "$(count_rev "$now..$target")" -eq "$n_range" ]] \
+            || moved_refuse rebase-count "the rebased range no longer has $n_range commit(s)" rebased
+        check_forbidden "$now" "$target"
+        if [[ -n "$remote" ]] && ! contains "$target" "$remote"; then
+            moved_refuse published "the rebased tip no longer contains ${bookmark}@origin" rebased
+        fi
+        differs=$(cd "$root" && jj diff --ignore-working-copy --from "commit_id(\"$checked\")" --to "commit_id(\"$target\")" \
+            --name-only -- "~($exempt)" 2>/dev/null; echo "exit=$?")
+        if [[ "$differs" != "exit=0" ]]; then
+            moved_refuse tree-differs "the rebased tree differs from the checked tree outside the exempt fileset" rebased
+        fi
+        n_moved=$(count_rev "$moved_old..$now")
+        skipped_moves=$((skipped_moves + 1)); skipped_commits=$((skipped_commits + n_moved))
+        skipped_report+=$(jj log --ignore-working-copy -r "$moved_old..$now" --no-graph \
+            -T '"    " ++ commit_id.short() ++ " " ++ description.first_line() ++ "\n"' 2>/dev/null)$'\n'
+        now=$(one_rev "$bookmark")
+    done
+    if [[ "$skipped_moves" -gt 0 ]]; then
+        ev land-recheck-skipped rule=recheck-skipped "moves=$skipped_moves" "trunk_commits=$skipped_commits"
+        echo "jj land: land.check NOT re-run: it passed on ${checked:0:12}; '$bookmark' gained $skipped_commits commit(s)"
+        echo "         touching only land.recheck-exempt = $exempt"
+        printf '%s' "$skipped_report"
+        echo "         and the rebased tip ${target:0:12} equals the checked tree outside that fileset."
     fi
     old=$now
 fi

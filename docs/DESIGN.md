@@ -72,6 +72,27 @@ ordinary files. A content scanner was rejected for the same reason in the other 
 would read secret values into agent output. Capture happens at snapshot time, before any landing,
 so no landing check can undo it — the reference says so instead of implying otherwise.
 
+## Trade-off: a moved trunk can skip the re-check only inside a declared fileset
+
+`land.check` checks one tree; if trunk moves while it runs, the tree that would land is a
+different one, so the default is to refuse. Repositories with a minutes-long check and a steady
+stream of documentation landings then spend most attempts re-checking trees whose checked part
+did not change. `land.recheck-exempt` lets a repository declare the paths its check never reads.
+Within that declaration the skip is exact rather than heuristic: the arriving commits touch only
+exempt paths (per commit and in sum, so a rename out of a protected path counts), the range is
+rebased only when it is rooted solely on the old trunk and shares no path or directory with the
+move (so the path-level merge cannot conflict), and the rebased tree is compared with the checked
+tree outside the fileset, which must be identical. Everything else re-runs the old refusal.
+
+Rejected: re-running the check automatically (the cost being avoided) and accepting overlapping
+docs edits that merge cleanly (a non-conflicting merge is still a tree nobody checked; the exact
+condition is cheaper to reason about than a merge-quality one). The declaration is the risk: a
+fileset that covers a file some check reads lets an unchecked change of that file land. The
+remaining race — trunk moving again during the rebase — is handled by re-reading the bookmark and
+repeating the whole verification (at most five times) before the move; the final
+`jj bookmark set` itself refuses a move that stopped being forward. Truly concurrent jj
+operations can still merge into a conflicted bookmark, which Guard 0 then refuses on the next land.
+
 ## Trade-off: event log is local and unauthenticated
 
 `jj-agent-event` appends plain JSONL with no signing and logs only rule names, ids and

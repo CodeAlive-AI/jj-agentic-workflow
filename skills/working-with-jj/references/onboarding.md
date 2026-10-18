@@ -47,6 +47,14 @@ Facts an agent cannot discover reliably, or that differ from defaults:
   `JJ_LAND_BOOKMARK` set, and refuses the land on a non-zero exit. Have the command read the
   checker from the target commit, not from a working copy that may be stale. Keep the setup
   command in the repository so every clone can reproduce it.
+- **Re-check exemption**, optional and only beside a slow land check: a fileset
+  (`jj config set --repo land.recheck-exempt '<fileset>'`) of paths the check provably never
+  reads. If trunk moves while the check runs, `jj land` normally refuses; with the exemption it
+  rebases the range onto the new trunk and lands without re-running the check — but only when
+  every arriving commit touches only exempt paths, the two sides share no path (no conflict is
+  possible), and the rebased tree equals the checked tree outside the fileset. It prints and logs
+  (`rule=recheck-skipped`) what it skipped. List only paths no check, test or contract reads;
+  when unsure, leave a path out. Unset means the old refusal.
 - A pointer to any repository-specific companion skill, loaded *in addition to* the two core
   skills, never instead of them.
 
