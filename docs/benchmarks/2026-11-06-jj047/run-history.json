@@ -1,0 +1,15 @@
+{
+  "date": "2026-11-06",
+  "kind": "Deterministic CLI research; no model calls or performance measurements",
+  "runs": [
+    {"id": "exploratory-basics", "outcome": "Completed", "findings": ["Three-side terms", "revset unavailable in op templates", "Inline Option error returns exit 0", "Read-only observation preserves unsnapshotted disk"]},
+    {"id": "exploratory-edges-1", "outcome": "Stopped on prototype template error", "reason": "Map cannot be defined here: a map literal was placed directly in a map lambda instead of inside json()", "completed_before_failure": ["Task scoping", "Pinned observation", "Null deletion term", "Partial editor resolution", "Ambiguous operation heads"]},
+    {"id": "exploratory-edges-2", "outcome": "Stopped on prototype JSON parsing error", "reason": "Bookmark list emitted both local and Git-remote records; JSON objects lacked separators", "correction": "Explicitly select the local record"},
+    {"id": "exploratory-edges-3", "outcome": "Stopped on prototype template quoting error", "reason": "Nested bookmark revset string was not escaped", "correction": "Encode the revset string with JSON.stringify before passing it as a template argument"},
+    {"id": "exploratory-edges-4", "outcome": "Completed", "findings": ["Two versions of one divergent change", "Delete/update bookmark with one non-null target", "Two workspaces at one commit have distinct current_workspace identity"]},
+    {"id": "consolidated-1", "fixture_directory_suffix": "cJAYJY", "outcome": "13 assertions passed; one was subsequently found insufficient", "reason": "Invalid-revision test hit --ignore-working-copy refusal before resolving the revision", "correction": "Remove that flag for this disposable fixture and assert the missing-revision error"},
+    {"id": "consolidated-2", "fixture_directory_suffix": "DLin7O", "outcome": "13 checks completed; preparation compatibility check failed", "reason": "0.47.1 rejects the deployed metadata-only workspace preparation recipe", "correction": "Record this as an upgrade blocker, not a passing lifecycle qualification"},
+    {"id": "consolidated-3", "fixture_directory_suffix": "mMOpbL", "outcome": "14 checks completed; candidate caller-preservation assertion failed", "reason": "--at-op=@ snapshots the caller", "correction": "Record the unsafe alternative and test a full operation ID separately"},
+    {"id": "consolidated-4", "fixture_directory_suffix": "0jEoxT", "outcome": "16 checks passed", "results": "results.json", "qualification": "Includes assertions that reproduce incompatibility and unsafe behavior; not approval to deploy the workflow"}
+  ]
+}

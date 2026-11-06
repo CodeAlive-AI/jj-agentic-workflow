@@ -1,0 +1,1 @@
+json({"conflicts" => revset("mutable() & conflicts()").len(), "divergent" => revset("mutable() & divergent()").len()}) ++ "\n"

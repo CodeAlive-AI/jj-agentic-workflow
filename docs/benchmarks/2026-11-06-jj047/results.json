@@ -1,0 +1,247 @@
+{
+  "version": "jj 0.47.1-d16ee1fc88a72c54142241b079a34bbf3b033bc0",
+  "lab": "/var/folders/wg/6vmdxx0s77l1f61cktpfrn0h0000gn/T/jj047-evidence-0jEoxT",
+  "passed": 16,
+  "checks": [
+    {
+      "name": "three-side conflict terms and commit-versus-file counts",
+      "evidence": {
+        "overview": {
+          "conflicts": 1,
+          "divergent": 0
+        },
+        "conflicts": [
+          {
+            "path": "drawing.txt",
+            "sides": 3,
+            "removes": [
+              {
+                "object_id": "df967b96a579e45a18b8251732d16804b2e56a55",
+                "file_type": "file",
+                "executable": false
+              },
+              {
+                "object_id": "df967b96a579e45a18b8251732d16804b2e56a55",
+                "file_type": "file",
+                "executable": false
+              }
+            ],
+            "adds": [
+              {
+                "object_id": "f70f10e4db19068f79bc43844b49f3eece45c4e8",
+                "file_type": "file",
+                "executable": false
+              },
+              {
+                "object_id": "223b7836fb19fdf64ba2d3cd6173c6a283141f78",
+                "file_type": "file",
+                "executable": false
+              },
+              {
+                "object_id": "3cc58df83752123644fef39faab2393af643b1d2",
+                "file_type": "file",
+                "executable": false
+              }
+            ]
+          },
+          {
+            "path": "second.txt",
+            "sides": 3,
+            "removes": [
+              {
+                "object_id": "df967b96a579e45a18b8251732d16804b2e56a55",
+                "file_type": "file",
+                "executable": false
+              },
+              {
+                "object_id": "df967b96a579e45a18b8251732d16804b2e56a55",
+                "file_type": "file",
+                "executable": false
+              }
+            ],
+            "adds": [
+              {
+                "object_id": "f70f10e4db19068f79bc43844b49f3eece45c4e8",
+                "file_type": "file",
+                "executable": false
+              },
+              {
+                "object_id": "223b7836fb19fdf64ba2d3cd6173c6a283141f78",
+                "file_type": "file",
+                "executable": false
+              },
+              {
+                "object_id": "3cc58df83752123644fef39faab2393af643b1d2",
+                "file_type": "file",
+                "executable": false
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "Git-backed file object retrieval",
+      "evidence": {
+        "objectId": "f70f10e4db19068f79bc43844b49f3eece45c4e8",
+        "content": "A\n"
+      }
+    },
+    {
+      "name": "revset unavailable in operation templates",
+      "evidence": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "Error: Failed to parse template: Function `revset` doesn't exist\nCaused by:  --> 1:42\n  |\n1 | json({\"operation_id\" => id, \"commits\" => revset(\"@\").map(|c| c.commit_id())})\n  |                                          ^----^\n  |\n  = Function `revset` doesn't exist\n"
+      }
+    },
+    {
+      "name": "zero exit status is not proof of valid JSON",
+      "evidence": {
+        "status": 0,
+        "stdout": "<Error: No value set to Option<Commit>>",
+        "stderr": ""
+      }
+    },
+    {
+      "name": "observation neither snapshots disk edits nor creates an operation",
+      "evidence": {
+        "operation": "1e682de6445128cdcf88333cbbecb69fb205e18ecb28f173d95bf74c9cd5e56b032db1af983a2982864d2bf69d815152292c436a5f1d9f28d265b6c267508fb3"
+      }
+    },
+    {
+      "name": "task scope excludes unrelated conflicts; pinned operation preserves prior view",
+      "evidence": {
+        "global": {
+          "conflicts": 1,
+          "divergent": 0
+        },
+        "scoped": {
+          "conflicts": 0
+        },
+        "pinned": "1e682de6445128cdcf88333cbbecb69fb205e18ecb28f173d95bf74c9cd5e56b032db1af983a2982864d2bf69d815152292c436a5f1d9f28d265b6c267508fb3",
+        "pinnedCommit": "9a7042e4ad885791f58adc7f1cc7cb6a9989f426"
+      }
+    },
+    {
+      "name": "absent conflict term survives as JSON null",
+      "evidence": [
+        {
+          "path": "drawing.txt",
+          "sides": 2,
+          "removes": [
+            {
+              "object_id": "df967b96a579e45a18b8251732d16804b2e56a55",
+              "file_type": "file",
+              "executable": false
+            }
+          ],
+          "adds": [
+            null,
+            {
+              "object_id": "f70f10e4db19068f79bc43844b49f3eece45c4e8",
+              "file_type": "file",
+              "executable": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "noninteractive :editor preserves partial three-side resolution",
+      "evidence": {
+        "beforeHunks": 2,
+        "afterHunks": 1,
+        "unresolved": true,
+        "resolvedTextPreserved": true
+      }
+    },
+    {
+      "name": "ambiguous operation heads produce an error without merging",
+      "evidence": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "Error: The \"@\" expression resolved to more than one operation\nHint: Try specifying one of the operations by ID: 31671857be34, bb3410cdf11c\n"
+      }
+    },
+    {
+      "name": "divergent versions differ from unique divergent changes",
+      "evidence": [
+        {
+          "change_id": "nxkvxxzmsyvwqzsszryyovyxpxztwqrm",
+          "commit_id": "0b4e72b948f12dfec406927ae12d16ee3e88b15e"
+        },
+        {
+          "change_id": "nxkvxxzmsyvwqzsszryyovyxpxztwqrm",
+          "commit_id": "6b70df02eafdae536f8eb949332c55999c625a16"
+        }
+      ]
+    },
+    {
+      "name": "bookmark delete/update conflict has one non-null target",
+      "evidence": {
+        "bookmark": {
+          "name": "delete-update",
+          "conflict": true,
+          "added_count": 2,
+          "removed_count": 1
+        },
+        "targets": [
+          "37f78a2f30b82674ab93fd653bd6585e84af157c"
+        ],
+        "nameLookup": {
+          "status": 1,
+          "stdout": "",
+          "stderr": "Error: Name `delete-update` is conflicted\nHint: Use commit ID to select single revision from: 37f78a2f30b8\nHint: Use `bookmarks(delete-update)` to select all revisions\nHint: To set which revision the bookmark points to, run `jj bookmark set delete-update -r <REVISION>`\n"
+        }
+      }
+    },
+    {
+      "name": "workspace identity differs from shared commit identity",
+      "evidence": [
+        {
+          "name": "child",
+          "current_workspace": false,
+          "target_is_current_commit": true
+        },
+        {
+          "name": "default",
+          "current_workspace": true,
+          "target_is_current_commit": true
+        }
+      ]
+    },
+    {
+      "name": "invalid workspace revision leaves no destination",
+      "evidence": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "Error: Revision `missing-revision` doesn't exist\n"
+      }
+    },
+    {
+      "name": "INCOMPATIBILITY: current prepare recipe is rejected by 0.47.1",
+      "evidence": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "Error: This command must be able to update the working copy.\nHint: Don't use --ignore-working-copy.\n"
+      }
+    },
+    {
+      "name": "UNSAFE replacement: --at-op=@ snapshots the caller",
+      "evidence": {
+        "callerCommitChanged": true,
+        "unsavedFileCaptured": true
+      }
+    },
+    {
+      "name": "candidate exact-operation prepare preserves caller and materializes child directly",
+      "evidence": {
+        "callerCommitUnchanged": true,
+        "callerDiskNotSnapshotted": true,
+        "childMaterialized": true,
+        "childParentMatchesBase": true
+      }
+    }
+  ]
+}
