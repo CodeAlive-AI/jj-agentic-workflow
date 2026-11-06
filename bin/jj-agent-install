@@ -21,9 +21,12 @@ def add_selected_hooks(document, runtime, host, project=None, push_project=None)
     scripts = ({"WorktreeCreate": "jj-claude-worktree.py", "WorktreeRemove": "jj-claude-worktree.py"}
                if project else {"SessionStart": "jj-context.py", "PostCompact": "jj-context.py",
                                 **({"PostToolUse": "jj-attribution.py"} if host == "claude" else {})})
-    if not project and host == "codex" and push_project:
-        scripts["PreToolUse"] = "jj-push-gate.py"
-    replaced = set(scripts.values())
+    pre_tool = []
+    if not project:
+        if host == "codex" and push_project:
+            pre_tool.append("jj-push-gate.py")
+        pre_tool.append("jj-rm-workspace.py")
+    replaced = set(scripts.values()) | set(pre_tool)
     for event, groups in list(events.items()):
         kept = []
         for group in groups:
@@ -35,14 +38,15 @@ def add_selected_hooks(document, runtime, host, project=None, push_project=None)
             events[event] = kept
         else:
             events.pop(event, None)
-    for event, script in scripts.items():
+    for event, script in [*scripts.items(), *(("PreToolUse", script) for script in pre_tool)]:
         command = shlex.join([sys.executable, str(runtime / "hooks" / script)])
         if project:
             command += " --project " + shlex.quote(str(project))
         if script == "jj-push-gate.py":
             command += " --project " + shlex.quote(str(push_project))
         group = {"hooks": [{"type": "command", "command": command,
-                             "timeout": 900 if script == "jj-push-gate.py" else (120 if project else 20)}]}
+                             "timeout": {"jj-push-gate.py": 900, "jj-rm-workspace.py": 10}.get(
+                                 script, 120 if project else 20)}]}
         if event == "PostToolUse":
             group["matcher"] = "Bash"
         if event == "PreToolUse":
@@ -116,7 +120,8 @@ def main():
     # Ship only reviewed implementations, never the retired Stop/world-watch guards.
     if args.observational_hooks or args.claude_lifecycle:
         files += [SOURCE / "hooks" / name for name in
-                  ["jj-context.py", "jj-attribution.py", "jj-claude-worktree.py", "jj-push-gate.py"]]
+                  ["jj-context.py", "jj-attribution.py", "jj-claude-worktree.py", "jj-push-gate.py",
+                   "jj-rm-workspace.py"]]
         files.sort()
     stamp = hashlib.sha256(b"".join(str(p.relative_to(SOURCE)).encode() + p.read_bytes() for p in files)).hexdigest()[:16]
     home = args.target_home.expanduser().resolve()

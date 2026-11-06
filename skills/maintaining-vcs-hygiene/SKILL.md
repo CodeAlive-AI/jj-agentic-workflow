@@ -92,7 +92,7 @@ when agents lose context or share a repository with other writers.
   fixtures and vendored sources, and the loss surfaces only in CI or never.
 - Close what you opened, within your ownership: delete your merged branches/bookmarks and
   finish your assigned workspace. In jj use `jj-agent finish` before explicit `--remove`;
-  ignored files are not protected by snapshots. Never remove active or unmanaged workspaces.
+  it works for raw and forgotten workspaces too, so never `rm -rf` one. Never remove another writer's active workspace.
 - A host `Stop` means the agent ended a turn, not that the workspace should be deleted.
   Inspecting sessions and subagents must not land, park, or clean another writer's work.
 - Keep completion checks explicit. Do not enforce landing through response/Stop hooks or replace

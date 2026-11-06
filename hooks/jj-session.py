@@ -54,7 +54,7 @@ def main():
             return 0
         jj(workspace, "status", mutate=True)
         try:
-            pending = unaddressed(workspace, record["base"])
+            pending = unaddressed(workspace, record)
         except Failure as error:
             print(json.dumps({"decision": "block", "reason": str(error)}))
             return 0

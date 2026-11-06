@@ -30,8 +30,9 @@ shared `jj-session.py` handler, world watcher, abandon guard or unused SubagentS
 
 The selected profile is installed with:
 `uv run --no-project --python 3.14 --script bin/jj-agent-install --observational-hooks --codex-push-project /absolute/approved/project`.
-It adds SessionStart/PostCompact on both hosts, Claude-only attribution advice, and an explicitly
-project-scoped Codex push router. Existing sensitive-file and cloud setup hooks remain separate.
+It adds SessionStart/PostCompact on both hosts, Claude-only attribution advice, a PreToolUse hint on
+both hosts that redirects `rm -r <workspace root>` to `jj-agent finish --remove` (filesystem check only;
+it never fires for other paths), and an explicitly project-scoped Codex push router. Existing sensitive-file and cloud setup hooks remain separate.
 The installer backs up changes and does not flip the global Codex switch. Disable unselected
 plugin/project hooks through native hook state before enabling Codex hooks, then review/trust only
 selected definitions through `/hooks`. Never fabricate trust hashes or change sandbox/permissions.

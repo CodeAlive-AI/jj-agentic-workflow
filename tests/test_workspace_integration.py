@@ -100,6 +100,84 @@ class WorkspacePilot(unittest.TestCase):
         self.assertIn("task.txt", self.cmd("jj", "--ignore-working-copy", "file", "list", "-r", "parked/task"))
         self.assertNotIn(str(child), self.cmd("git", "worktree", "list", "--porcelain"))
 
+    def raw_workspace(self, name, *flags):
+        path = self.repo / ".workspaces" / name
+        path.parent.mkdir(exist_ok=True)
+        self.cmd("jj", "workspace", "add", *flags, "--name", name, "-r", "main", str(path))
+        return path
+
+    def test_finish_adopts_raw_workspaces_and_discards_rebuildable_caches(self):
+        for flags in [(), ("--colocate",)]:
+            child = self.raw_workspace("raw" + "".join(flags).replace("-", ""), *flags)
+            (child / "node_modules/pkg").mkdir(parents=True)
+            (child / "node_modules/pkg/index.js").write_text("cache\n")
+            (child / "sub/__pycache__").mkdir(parents=True)
+            (child / "sub/__pycache__/m.pyc").write_text("cache\n")
+            (self.repo / ".gitignore").write_text(".workspaces/\n.local-ignore.txt\nnode_modules/\n__pycache__/\n")
+            (child / ".gitignore").write_text((self.repo / ".gitignore").read_text())
+            self.cmd("jj", "describe", "-m", "ignore caches", cwd=child)
+            self.cmd("jj", "bookmark", "create", "parked/" + child.name, "-r", "@", cwd=child)
+            result = finish(child, remove=True)
+            self.assertTrue(result["removed"] and result["adopted"], result)
+            self.assertIn("node_modules", result["discarded_regenerable"])
+            self.assertFalse(child.exists())
+            self.assertNotIn(child.name, self.cmd("jj", "workspace", "list"))
+
+    def test_adopted_finish_still_refuses_lost_work(self):
+        child = self.raw_workspace("rawwork")
+        (child / "task.txt").write_text("work\n")
+        with self.assertRaisesRegex(Failure, "Land or park"):
+            finish(child, remove=True)
+        self.cmd("jj", "bookmark", "create", "parked/rawwork", "-r", "@", cwd=child)
+        (child / ".local-ignore.txt").write_text("notes\n")
+        with self.assertRaisesRegex(Failure, "--discard-path .local-ignore.txt"):
+            finish(child, remove=True)
+        self.assertTrue(child.exists())
+        self.assertTrue(finish(child, remove=True, discard_paths=[".local-ignore.txt"])["removed"])
+
+    def test_finish_clears_a_directory_jj_already_forgot(self):
+        child = self.raw_workspace("forgot")
+        (child / "task.txt").write_text("work\n")
+        self.cmd("jj", "status", cwd=child)
+        self.cmd("jj", "workspace", "forget", "forgot")
+        with self.assertRaisesRegex(Failure, "Land or park"):
+            finish(child, remove=True)
+        head = finish.__globals__["last_checkout"](child)
+        self.assertEqual(head[1], "forgot")
+        commit_id = self.cmd("jj", "--ignore-working-copy", f"--at-op={head[0]}", "log", "-r", "forgot@",
+                             "--no-graph", "-T", "commit_id")
+        self.cmd("jj", "bookmark", "create", "parked/forgot", "-r", commit_id)
+        import time; time.sleep(0.05)
+        (child / "base.txt").write_text("edited after the last snapshot\n")
+        with self.assertRaisesRegex(Failure, "base.txt"):
+            finish(child, remove=True)
+        result = finish(child, remove=True, discard_paths=["base.txt"])
+        self.assertTrue(result["removed"])
+        self.assertFalse(child.exists())
+
+    def test_primary_checkout_is_never_finished(self):
+        with self.assertRaisesRegex(Failure, "holds the repository"):
+            finish(self.repo, remove=True)
+        self.assertTrue((self.repo / ".jj/repo").is_dir())
+
+    def test_rm_hook_redirects_only_workspace_roots(self):
+        child = self.raw_workspace("rmhint")
+        (child / "scratch").mkdir()
+        def decision(command, cwd=self.repo):
+            result = self.hook("jj-rm-workspace.py", cwd, "PreToolUse", tool_name="Bash",
+                               tool_input={"command": command})
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return json.loads(result.stdout)["hookSpecificOutput"] if result.stdout else None
+        for command, cwd in [("rm -rf .workspaces/rmhint", self.repo), (f"rm -fr {child}/", self.lab),
+                             ("cd .workspaces && rm -r -f rmhint", self.repo), ("rm -rf .workspaces/*", self.repo)]:
+            output = decision(command, cwd)
+            self.assertEqual(output["permissionDecision"], "deny", command)
+            self.assertIn(f"jj-agent -R {child} finish --remove", output["permissionDecisionReason"])
+        for command in ["rm -rf .workspaces/rmhint/scratch", "rm .workspaces/rmhint/base.txt",
+                        "rm -rf \"$WS\"", "echo rm -rf", "rm -rf ."]:
+            self.assertIsNone(decision(command), command)
+        self.assertTrue(child.exists())
+
     def test_stop_only_checks_owner(self):
         child = prepare(self.repo, "ownership", "main")
         started = self.hook("jj-session.py", child, "SessionStart")

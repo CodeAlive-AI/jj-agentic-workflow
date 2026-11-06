@@ -47,16 +47,19 @@ jj-agent finish
 jj-agent finish --remove
 ```
 
-Finish snapshots the owned workspace and refuses unaddressed work in the task lineage or
-conflicts. Removal additionally checks ignored/untracked filenames, without reading contents.
-Preserve them first. Only explicitly disposable paths may use `--discard-path <relative-path>`;
-never discard credentials by default. The recovery receipt lives outside the removed directory
-under `~/.local/state/jj-agent/finished/`.
+From another directory: `jj-agent -R <workspace> finish --remove`. It works for every secondary
+workspace: one made by `prepare`, one made with raw `jj workspace add` (adopted: its own work is
+everything under `@` that no bookmark keeps), and a directory jj already forgot (judged by its
+last snapshot; files changed after it count as unsaved). It refuses only unaddressed work,
+conflicts, or untracked/ignored files that would be lost, and then prints the exact command with
+`--discard-path` for what it listed; move anything worth keeping out first and never discard
+credentials by default. Rebuildable caches (`node_modules`, `__pycache__`, `.venv`, `.next`, …)
+are discarded and reported. The primary checkout is never removed. The recovery receipt lives
+outside the removed directory under `~/.local/state/jj-agent/finished/`.
 
-JJ `workspace remove` deletes a directory; snapshots do not protect ignored files. Do not use
-raw removal or Git host cleanup as a shortcut. `workspace forget` only forgets metadata and is a
-different operation. The wrapper refuses unmanaged workspaces. Stop/SubagentStop never remove
-a workspace, and SessionEnd is not configured as a cleanup event.
+Never `rm -rf` a workspace root: jj keeps a stale record and unlanded work is lost silently.
+The selected profile's PreToolUse hook redirects such a command to `finish --remove`.
+Stop/SubagentStop never remove a workspace, and SessionEnd is not configured as a cleanup event.
 
 Deletion is safe only with exclusive ownership: another process can write after the checks.
 Stop writers before removing. The metadata lock is not a filesystem lock against arbitrary tools.

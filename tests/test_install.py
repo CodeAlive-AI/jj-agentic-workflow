@@ -77,8 +77,12 @@ class InstallTest(unittest.TestCase):
             self.assertFalse(tomllib.loads(config.read_text())["features"]["hooks"])
             codex = json.loads((home / ".codex/hooks.json").read_text())["hooks"]
             claude = json.loads((home / ".claude/settings.json").read_text())["hooks"]
-            self.assertEqual(set(codex), {"SessionStart", "PostCompact"})
-            self.assertEqual(set(claude), {"SessionStart", "PostCompact", "PostToolUse"})
+            self.assertEqual(set(codex), {"SessionStart", "PostCompact", "PreToolUse"})
+            self.assertEqual(set(claude), {"SessionStart", "PostCompact", "PostToolUse", "PreToolUse"})
+            for hooks in (codex, claude):
+                handler = hooks["PreToolUse"][0]
+                self.assertEqual(handler["matcher"], "^Bash$")
+                self.assertIn("jj-rm-workspace.py", handler["hooks"][0]["command"])
             runtime = Path(json.loads(result.stdout)["runtime"])
             self.assertFalse((runtime / "hooks/jj-session.py").exists())
             second = subprocess.run([sys.executable, str(INSTALL), "--target-home", str(home),
@@ -98,6 +102,7 @@ class InstallTest(unittest.TestCase):
             self.assertEqual(set(data), {"SessionStart", "PostCompact", "PreToolUse"})
             handler = data["PreToolUse"][0]["hooks"][0]
             self.assertIn("jj-push-gate.py", handler["command"])
+            self.assertIn("jj-rm-workspace.py", data["PreToolUse"][1]["hooks"][0]["command"])
             self.assertIn(str(project), handler["command"])
             self.assertNotIn("$(jj root)", handler["command"])
 

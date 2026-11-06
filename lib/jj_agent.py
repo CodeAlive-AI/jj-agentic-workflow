@@ -6,6 +6,8 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
+import shutil
 import subprocess
 import tempfile
 import time
@@ -99,6 +101,53 @@ def manifest(workspace):
     return data
 
 
+def workspace_names(workspace):
+    rows = jj(workspace, "workspace", "list", "-T", 'name ++ "\t" ++ self.root() ++ "\n"').splitlines()
+    return {name: Path(path).resolve() for name, _, path in (row.partition("\t") for row in rows) if path}
+
+
+def last_checkout(workspace):
+    """(operation id, workspace name) from the working copy's own checkout record.
+
+    The record is a two-field protobuf: 0x12 <len> operation-id bytes, 0x1a <len> name.
+    """
+    data = (workspace / ".jj/working_copy/checkout").read_bytes()
+    fields, at = {}, 0
+    while at + 2 <= len(data):
+        tag, size = data[at], data[at + 1]
+        fields[tag] = data[at + 2:at + 2 + size]
+        at += 2 + size
+    if 0x12 not in fields or 0x1a not in fields:
+        raise Failure(f"Cannot read the working-copy record of {workspace}; inspect it by hand")
+    return fields[0x12].hex(), fields[0x1a].decode()
+
+
+def record(workspace):
+    """The creation record, or one adopted for a workspace made with raw `jj workspace add`.
+
+    An adopted workspace has no recorded base, so its own work is everything under @
+    that no bookmark keeps: the same set a person would check before deleting it. A
+    directory whose workspace jj already forgot is judged by its last snapshot.
+    """
+    if (workspace / ".jj/jj-agent.json").is_file():
+        return manifest(workspace)
+    if (workspace / ".jj" / "repo").is_dir():
+        raise Failure(f"{workspace} holds the repository itself; it is never finished or removed")
+    known = workspace_names(workspace)
+    names = [name for name, path in known.items() if path == workspace]
+    data = {"path": str(workspace), "store": str(repo_store(workspace)), "base": None,
+            "initial_change": None, "owner_session": None, "adopted": True}
+    if len(names) == 1:
+        return {**data, "name": names[0]}
+    op, name = last_checkout(workspace)
+    if name in known:
+        raise Failure(f"Workspace {name} now lives at {known[name]}, not {workspace}; inspect both")
+    head = run(["jj", "--no-pager", "--ignore-working-copy", f"--at-op={op}", "log", "-r", f"{name}@",
+                "--no-graph", "-T", "commit_id"], workspace).stdout.strip()
+    snapshot = (workspace / ".jj/working_copy/tree_state").stat().st_mtime
+    return {**data, "name": name, "forgotten": True, "head": head, "snapshot_time": snapshot}
+
+
 def prepare(cwd, name, revision, destination=None, session=None, snapshot_caller=False):
     version_check()
     workspace = root(cwd)
@@ -151,9 +200,18 @@ def doctor(cwd):
             "git_root": str(git_root), "managed": (workspace / ".jj/jj-agent.json").is_file()}
 
 
-def unaddressed(workspace, base):
-    record = manifest(workspace)
-    owned = f'({base}..@) | change_id("{record["initial_change"]}")::'
+# Ignored directories every toolchain rebuilds; removal discards them without asking.
+REGENERABLE = {"node_modules", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+               ".next", ".turbo", ".venv", ".eslintcache", ".DS_Store"}
+
+
+def unaddressed(workspace, data):
+    if data.get("initial_change"):
+        owned = f'({data["base"]}..@) | change_id("{data["initial_change"]}")::'
+    elif data.get("forgotten"):
+        owned = f'::{data["head"]} & ~::(bookmarks() | remote_bookmarks() | tags())'
+    else:
+        owned = "::@ & ~::(bookmarks() | remote_bookmarks() | tags())"
     conflicts = jj(workspace, "log", "-r", f'({owned}) & conflicts()',
                    "--no-graph", "-T", 'commit_id ++ "\n"').splitlines()
     if conflicts:
@@ -163,42 +221,88 @@ def unaddressed(workspace, base):
               "--no-graph", "-T", 'commit_id ++ "\n"').splitlines()
 
 
+def untracked(workspace, revision="@", since=None):
+    """Files on disk that jj does not track, each under its top untracked directory.
+
+    Walks the tree itself rather than asking Git, so a non-colocated workspace is checked
+    the same way. Rebuildable cache directories are pruned and listed apart, so a directory
+    holding only caches is not reported. Names only: no file is opened.
+    """
+    tracked = set(jj(workspace, "file", "list", "-r", revision, "-T", 'path ++ "\n"').splitlines())
+    tracked_dirs = {str(d) for p in tracked for d in Path(p).parents}
+    files, regenerable = [], []
+    for current, subdirs, names in os.walk(workspace):
+        rel = Path(current).relative_to(workspace)
+        if rel == Path("."):
+            subdirs[:] = [d for d in subdirs if d not in (".jj", ".git")]
+            names = [n for n in names if n != ".git"]
+        regenerable += [str(rel / d) for d in subdirs if d in REGENERABLE]
+        subdirs[:] = [d for d in subdirs if d not in REGENERABLE]
+        for name in names:
+            path = rel / name
+            if name in REGENERABLE:
+                regenerable.append(str(path))
+            elif str(path) not in tracked:
+                files.append(path)
+            elif since is not None and (Path(current) / name).lstat().st_mtime > since:
+                files.append(path)  # Changed after jj's last snapshot of a forgotten workspace.
+    found = set()
+    for path in files:
+        top = path
+        for parent in reversed(path.parents[:-1]):
+            if str(parent) not in tracked_dirs:
+                top = parent
+                break
+        found.add(str(top) + ("/" if top != path else ""))
+    return sorted(found), sorted(regenerable)
+
+
 def finish(cwd, remove=False, discard_paths=()):
     workspace = root(cwd)
-    data = manifest(workspace)
+    data = record(workspace)
     with lifecycle_lock(workspace):
-        jj(workspace, "status", mutate=True)
-        outstanding = unaddressed(workspace, data["base"])
+        if not data.get("forgotten"):
+            try:
+                jj(workspace, "status", mutate=True)
+            except Failure as error:
+                if "stale" not in str(error):
+                    raise
+                run(["jj", "workspace", "update-stale"], workspace)
+                jj(workspace, "status", mutate=True)
+        outstanding = unaddressed(workspace, data)
         if outstanding:
-            raise Failure("Land or park the workspace's changes first: " + ", ".join(outstanding))
-        report = {"path": str(workspace), "name": data["name"], "commit": commit(workspace, "@"),
-                  "operation": operation(workspace), "removed": False}
+            raise Failure("Land or park the workspace's changes first (`jj land <rev>` or "
+                          "`jj park <name> <rev>`): " + ", ".join(outstanding))
+        head = data.get("head") or commit(workspace, "@")
+        report = {"path": str(workspace), "name": data["name"], "commit": head,
+                  "operation": operation(workspace), "removed": False, "adopted": bool(data.get("adopted"))}
         if not remove:
             return report
-        doctor(workspace)
-        # File names only: never open ignored files. Deleting them requires explicit paths.
-        paths = set()
-        for extra in [[], ["--ignored"]]:
-            paths.update(run(["git", "ls-files", "--others", "--exclude-standard", "-z", *extra],
-                             workspace).stdout.split("\0"))
-        paths.discard("")
+        if (workspace / ".git").exists() and not data.get("forgotten"):
+            doctor(workspace)
         allowed = []
         for value in discard_paths:
             path = Path(value)
             if path.is_absolute() or ".." in path.parts or str(path) in (".", ".jj", ".git"):
                 raise Failure(f"Invalid discard path: {value}")
             allowed.append(path)
-        leftovers = [p for p in paths if Path(p).parts[0] not in (".jj", ".git")
-                     and not any(Path(p) == a or Path(p).is_relative_to(a) for a in allowed)]
+        found, regenerable = untracked(workspace, head, data.get("snapshot_time"))
+        leftovers = [p for p in found if not any(Path(p) == a or Path(p).is_relative_to(a) for a in allowed)]
         if leftovers:
-            raise Failure("Untracked/ignored files would be lost; preserve them before removal: "
-                          + ", ".join(sorted(leftovers)[:10]))
+            flags = " ".join(f"--discard-path {shlex.quote(p.rstrip('/'))}" for p in leftovers[:20])
+            raise Failure("Untracked or ignored files would be lost: " + ", ".join(leftovers[:20])
+                          + ("" if len(leftovers) <= 20 else f" and {len(leftovers) - 20} more")
+                          + ". Move anything worth keeping out, then discard the rest with: "
+                          + f"jj-agent -R {shlex.quote(str(workspace))} finish --remove {flags}")
+        report["discarded_regenerable"] = regenerable
         # Retain a recovery receipt outside the deleted workspace.
         receipt = state_dir() / "finished" / (hashlib.sha256(str(workspace).encode()).hexdigest() + ".json")
         atomic_json(receipt, {**data, **report})
-        run(["jj", "workspace", "remove", data["name"]], workspace)
+        if not data.get("forgotten"):
+            run(["jj", "workspace", "remove", data["name"]], workspace)
         if workspace.exists():
-            raise Failure(f"JJ did not remove the directory; inspect it: {workspace}")
+            # Only already-checked regenerable directories can remain; jj no longer knows the path.
+            shutil.rmtree(workspace)
         report["removed"] = True
         atomic_json(receipt, {**data, **report})
         return report
