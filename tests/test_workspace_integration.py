@@ -239,6 +239,29 @@ class WorkspacePilot(unittest.TestCase):
         with self.assertRaisesRegex(Failure, "Land or park"):
             finish(child, remove=True)
 
+    def test_finish_leaves_other_working_copies_on_landed_work_alone(self):
+        # 2026-11-07: the primary checkout followed main onto the landed task, carrying
+        # another writer's unsaved draft; finish counted that draft as the task's own.
+        child = prepare(self.repo, "landed", "main")
+        (child / "task.txt").write_text("landed work\n")
+        self.cmd("jj", "commit", "-m", "landed task", cwd=child)
+        self.cmd("jj", "bookmark", "set", "main", "-r", "@-", cwd=child)
+        (self.repo / "draft.txt").write_text("another writer's draft\n")
+        self.cmd("jj", "rebase", "-b", "@", "-d", "main")
+        result = finish(child, remove=True)
+        self.assertTrue(result["removed"])
+        self.assertIn("draft.txt", self.cmd("jj", "file", "list", "-r", "@"))
+
+    def test_finish_keeps_its_own_change_under_another_working_copy(self):
+        child = prepare(self.repo, "tried", "main")
+        (child / "task.txt").write_text("unlanded work\n")
+        self.cmd("jj", "commit", "-m", "unlanded task", cwd=child)
+        task = commit(child, "@-")
+        self.cmd("jj", "new", task, "-m", "trying the task")
+        self.cmd("jj", "new", "main", "-m", "next task", cwd=child)
+        with self.assertRaisesRegex(Failure, "Land or park"):
+            finish(child, remove=True)
+
     def test_observation_failure_is_visible(self):
         # Removing the binary from PATH must not turn failure into "unchanged".
         child = prepare(self.repo, "failure", "main")

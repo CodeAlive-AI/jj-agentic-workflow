@@ -207,7 +207,10 @@ REGENERABLE = {"node_modules", "__pycache__", ".pytest_cache", ".mypy_cache", ".
 
 def unaddressed(workspace, data):
     if data.get("initial_change"):
-        owned = f'({data["base"]}..@) | change_id("{data["initial_change"]}")::'
+        # Descendants of the initial change keep work stacked off @, but once it lands they
+        # also hold other workspaces' working copies; what those stand on is theirs.
+        initial = f'change_id("{data["initial_change"]}")'
+        owned = f'({data["base"]}..@) | {initial} | ({initial}:: ~ ::(working_copies() ~ @))'
     elif data.get("forgotten"):
         owned = f'::{data["head"]} & ~::(bookmarks() | remote_bookmarks() | tags())'
     else:

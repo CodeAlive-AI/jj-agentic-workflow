@@ -48,7 +48,10 @@ jj-agent finish --remove
 ```
 
 From another directory: `jj-agent -R <workspace> finish --remove`. It works for every secondary
-workspace: one made by `prepare`, one made with raw `jj workspace add` (adopted: its own work is
+workspace: one made by `prepare` (its own work is what lies under `@` after its base, plus its
+initial change and what stacks on it, except what another workspace's working copy stands on, so a
+checkout that followed `main` onto the landed task does not block it), one made with raw
+`jj workspace add` (adopted: its own work is
 everything under `@` that no bookmark keeps), and a directory jj already forgot (judged by its
 last snapshot; files changed after it count as unsaved). It refuses only unaddressed work,
 conflicts, or untracked/ignored files that would be lost, and then prints the exact command with
