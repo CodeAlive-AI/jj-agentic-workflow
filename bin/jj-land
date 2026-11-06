@@ -188,13 +188,29 @@ if [[ -n "$check" ]]; then
     status=${PIPESTATUS[0]}
     set -e
     if [[ "$status" -ne 0 ]]; then
-        ev land-refused rule=land-check "status=$status"
+        # Exit 2 is the check saying it could not judge the change (a missing tool,
+        # uninstalled dependencies); 137/143/255 mean it was killed. Neither is a
+        # verdict on the change, so the agent is told to fix the environment or rerun.
+        case "$status" in
+            2) reason=environment ;;
+            137|143|255) reason=killed ;;
+            *) reason=check-failed ;;
+        esac
+        ev land-refused rule=land-check "status=$status" "reason=$reason"
         echo "" >&2
-        echo "jj land: REFUSED — land.check failed on ${target:0:12} (exit $status); '$bookmark' did not move." >&2
+        case "$reason" in
+            environment) echo "jj land: NOT LANDED — land.check could not run on ${target:0:12}; your change was not judged and '$bookmark' did not move." >&2 ;;
+            killed) echo "jj land: NOT LANDED — land.check was killed (exit $status) on ${target:0:12}; your change was not judged and '$bookmark' did not move." >&2 ;;
+            *) echo "jj land: REFUSED — land.check failed on ${target:0:12} (exit $status); '$bookmark' did not move." >&2 ;;
+        esac
         echo "Last lines of its output:" >&2
         tail -n 40 "$check_log" | sed 's/^/  /' >&2
-        echo "Fix the cause in the change and land again. Do not bypass the check; if the check" >&2
-        echo "itself is wrong, fix it in the repository (land.check = $check)." >&2
+        case "$reason" in
+            environment) echo "Fix what the check names above (it is about the environment, not your code), then rerun: jj land ${target:0:12}" >&2 ;;
+            killed) echo "The check stopped before a verdict. Rerun: jj land ${target:0:12}" >&2 ;;
+            *) echo "Fix the cause in the change and land again. Do not bypass the check; if the check" >&2
+               echo "itself is wrong, fix it in the repository (land.check = $check)." >&2 ;;
+        esac
         rm -f "$check_log"
         exit 1
     fi

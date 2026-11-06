@@ -244,7 +244,7 @@ def untracked(workspace, revision="@", since=None):
                 regenerable.append(str(path))
             elif str(path) not in tracked:
                 files.append(path)
-            elif since is not None and (Path(current) / name).lstat().st_mtime > since:
+            elif since is not None and max((info := (Path(current) / name).lstat()).st_mtime, info.st_ctime) > since:
                 files.append(path)  # Changed after jj's last snapshot of a forgotten workspace.
     found = set()
     for path in files:

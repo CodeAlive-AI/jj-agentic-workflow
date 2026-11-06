@@ -25,6 +25,17 @@ import sys
 SEPARATORS = re.compile(r"&&|\|\||[;|\n]")
 
 
+def event(name, **fields):
+    """Record a refusal in the local guardrail log (rule names only); never fails."""
+    try:
+        import subprocess
+        subprocess.run([os.path.expanduser("~/.local/bin/jj-agent-event"), name,
+                        *(f"{k}={v}" for k, v in fields.items())],
+                       capture_output=True, timeout=5, check=False)
+    except Exception:
+        pass
+
+
 def recursive(flags):
     return any(flag == "--recursive" or re.fullmatch(r"-[A-Za-z]*[rR][A-Za-z]*", flag) for flag in flags)
 
@@ -77,6 +88,7 @@ def main():
                  "It removes the directory and jj's record of it, discards node_modules and other "
                  "rebuildable caches, and stops only if unlanded changes or unsaved files would be "
                  "lost, printing the exact next command. Run it from outside the workspace.")
+    event("hook-redirect", rule="rm-workspace", reason="route", count=len(found))
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
                       "permissionDecision": "deny", "permissionDecisionReason": "\n".join(lines)}}))
 

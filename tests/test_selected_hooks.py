@@ -137,6 +137,14 @@ class SelectedHooks(unittest.TestCase):
         missing = check("jj git push --bookmark main")
         self.assertEqual(json.loads(missing.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
         self.assertEqual(commit(self.repo, "@"), before)
+        # Commands that only mention a push are not pushes, even with -R or cd.
+        for mention in ("grep -R push scripts", "echo 'jj git push'", "git log --grep push",
+                        "cd sub && rg 'git push' .", "ssh host 'rg push'"):
+            self.assertEqual(check(mention).stdout, "", mention)
+        routed = json.loads(check("cd sub && jj git push -b main").stdout)["hookSpecificOutput"]
+        self.assertEqual(routed["permissionDecision"], "deny")
+        self.assertIn("Nothing in this command ran", routed["permissionDecisionReason"])
+        self.assertIn("-b main", routed["permissionDecisionReason"])
 
 
 if __name__ == "__main__":
