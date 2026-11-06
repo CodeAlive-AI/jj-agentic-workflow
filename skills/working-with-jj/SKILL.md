@@ -12,7 +12,8 @@ Baseline: **jj 0.46+**, **Git 2.42+** for colocated workspaces. Load
 
 Run `jj --ignore-working-copy --at-op=@ root` in the assigned directory. If it fails, do not
 apply this skill unless explicitly migrating a repository. Stay in the assigned write root.
-Never create a branch, worktree or workspace without a user request or launcher assignment.
+Create a branch, worktree or workspace only when the user, the launcher or the project's own
+instructions assign one (some projects make a task workspace the default).
 If another writer owns the checkout, inspect only; `jj new` there still moves their working copy.
 
 For an assigned new workspace use `jj-agent prepare <name> -r <full-base-id>`
@@ -24,6 +25,12 @@ run the project's explicit setup and readiness checks in the new root.
 Read [workspace-lifecycle.md](references/workspace-lifecycle.md) for prepare/finish and ownership,
 [codex.md](references/codex.md) for Codex, or [claude-code.md](references/claude-code.md) for Claude.
 Parallel writers need separately assigned roots. Pass the exact root to each delegate.
+
+## Flags that do not exist
+
+`jj` has no `-q` and `jj describe` has no `-F`. Silence output with `>/dev/null`, and give a
+multiline description with `jj describe --stdin < file` or `-m "$(cat file)"`. A failed flag in
+an `&&` chain stops everything after it, a land included, so check the exit status.
 
 ## Observe without changing state
 
