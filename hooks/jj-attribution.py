@@ -22,7 +22,11 @@ def direct_command(data):
     if isinstance(raw, str):
         lexer = shlex.shlex(raw, posix=True, punctuation_chars=";&|<>")
         lexer.whitespace_split = True
-        tokens = list(lexer)
+        try:
+            tokens = list(lexer)
+        except ValueError:
+            # Heredocs and other shell syntax shlex cannot split are never a plain jj command.
+            return None
     else:
         tokens = raw
     if not isinstance(tokens, list) or len(tokens) < 2 or Path(tokens[0]).name != "jj":

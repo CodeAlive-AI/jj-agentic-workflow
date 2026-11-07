@@ -61,6 +61,14 @@ class SelectedHooks(unittest.TestCase):
         self.assertEqual(checked.stdout, "")  # Parent has no attribution; it must not be checked.
         self.assertEqual(commit(self.repo, "@"), before)
 
+    def test_attribution_ignores_unparseable_shell(self):
+        command = "python3 - <<'EOF'\nprint(\"it's\")\nEOF"
+        checked = self.hook("jj-attribution.py", self.repo, "PostToolUse", tool_name="Bash",
+                            tool_input={"command": command},
+                            tool_response={"stdout": "it's\n", "stderr": "", "exit_code": 0})
+        self.assertEqual(checked.returncode, 0, checked.stderr)
+        self.assertEqual(checked.stdout, "")
+
     def test_attribution_advice_never_blocks_and_requires_output_evidence(self):
         (self.repo / "owned.txt").write_text("owned\n")
         result = subprocess.run(["jj", "describe", "-m", "Own work"], cwd=self.repo,
