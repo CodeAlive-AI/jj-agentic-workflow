@@ -93,6 +93,8 @@ when agents lose context or share a repository with other writers.
 - Close what you opened, within your ownership: delete your merged branches/bookmarks and
   finish your assigned workspace. In jj use `jj-agent finish` before explicit `--remove`;
   it works for raw and forgotten workspaces too, so never `rm -rf` one. Never remove another writer's active workspace.
+  When you land or integrate a delegate's parked work, finishing its workspace is yours; find
+  what is left with `jj-agent survey`.
 - A host `Stop` means the agent ended a turn, not that the workspace should be deleted.
   Inspecting sessions and subagents must not land, park, or clean another writer's work.
 - Keep completion checks explicit. Do not enforce landing through response/Stop hooks or replace

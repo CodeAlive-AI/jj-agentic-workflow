@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
-from jj_agent import Failure, doctor, finish, prepare
+from jj_agent import Failure, doctor, finish, prepare, survey
 
 
 def main():
@@ -25,11 +25,15 @@ def main():
     end.add_argument("--remove", action="store_true")
     end.add_argument("--discard-path", action="append", default=[],
                      help="Explicit disposable file/directory; never infer permission to discard secrets")
+    report = commands.add_parser("survey", help="Read-only: what keeps each workspace of the repository")
+    report.add_argument("--idle-hours", type=float, default=24.0)
     args = parser.parse_args()
     try:
         if args.command == "prepare":
             print(prepare(args.repository, args.name, args.revision, args.destination,
                           args.owner_session, args.snapshot_caller))
+        elif args.command == "survey":
+            print(json.dumps(survey(args.repository, args.idle_hours), indent=2, ensure_ascii=False))
         elif args.command == "doctor":
             print(json.dumps(doctor(args.repository), indent=2))
         else:

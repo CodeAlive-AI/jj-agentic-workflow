@@ -11,7 +11,7 @@ import unittest
 
 SOURCE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SOURCE / "lib"))
-from jj_agent import Failure, commit, doctor, finish, jj, operation, prepare as raw_prepare
+from jj_agent import Failure, commit, doctor, finish, jj, operation, prepare as raw_prepare, survey
 
 def prepare(*args, **kwargs):
     return raw_prepare(*args, snapshot_caller=True, **kwargs)
@@ -261,6 +261,73 @@ class WorkspacePilot(unittest.TestCase):
         self.cmd("jj", "new", "main", "-m", "next task", cwd=child)
         with self.assertRaisesRegex(Failure, "Land or park"):
             finish(child, remove=True)
+
+    def land_task(self, name):
+        child = prepare(self.repo, name, "main")
+        (child / f"{name}.txt").write_text("landed work\n")
+        self.cmd("jj", "commit", "-m", f"{name} task\n\nAgent-Session: task-1", cwd=child)
+        self.cmd("jj", "bookmark", "set", "main", "-r", "@-", cwd=child)
+        return child
+
+    def test_finish_ignores_other_writers_heads_on_landed_work(self):
+        # 2026-11-09: once a task landed, another session's floating commits on top of main
+        # were counted as the task's own, and the landed workspace could not be removed.
+        child = self.land_task("landed")
+        self.cmd("jj", "new", "main", "-m", "another writer's commit\n\nAgent-Session: other-2")
+        (self.repo / "other.txt").write_text("not the task's\n")
+        self.cmd("jj", "status")
+        other = commit(self.repo, "@")
+        self.cmd("jj", "new", "main", "-m", "primary moves on")
+        result = finish(child, remove=True)
+        self.assertTrue(result["removed"])
+        self.assertIn(other, self.cmd("jj", "log", "-r", "visible_heads()", "--no-graph", "-T", 'commit_id ++ "\n"'))
+
+    def test_finish_still_refuses_own_or_unsigned_work_on_landed_task(self):
+        for name, message in [("own", "follow-up\n\nAgent-Session: task-1"), ("unsigned", "follow-up")]:
+            child = self.land_task(name)
+            (child / "more.txt").write_text("unlanded follow-up\n")
+            self.cmd("jj", "commit", "-m", message, cwd=child)
+            self.cmd("jj", "new", "main", "-m", "next", cwd=child)
+            with self.assertRaisesRegex(Failure, "Land or park"):
+                finish(child, remove=True)
+
+    def test_repository_names_its_own_regenerable_caches(self):
+        (self.repo / ".gitignore").write_text(".workspaces/\n.local-ignore.txt\n.impact/\n")
+        (self.repo / ".jj-agent-regenerable").write_text("# test-impact broker cache\n.impact\n")
+        self.cmd("jj", "commit", "-m", "declare caches")
+        self.cmd("jj", "bookmark", "set", "main", "-r", "@-")
+        child = prepare(self.repo, "cached", "main")
+        (child / ".impact").mkdir()
+        (child / ".impact/index.json").write_text("{}\n")
+        result = finish(child, remove=True)
+        self.assertTrue(result["removed"])
+        self.assertIn(".impact", result["discarded_regenerable"])
+
+    def test_invalid_regenerable_name_is_refused(self):
+        (self.repo / ".jj-agent-regenerable").write_text("src/cache\n")
+        self.cmd("jj", "commit", "-m", "declare a bad cache")
+        self.cmd("jj", "bookmark", "set", "main", "-r", "@-")
+        child = prepare(self.repo, "badcache", "main")
+        with self.assertRaisesRegex(Failure, "invalid name"):
+            finish(child, remove=True)
+        self.assertTrue(child.exists())
+
+    def test_survey_reports_without_changing_anything(self):
+        landed = self.land_task("done")
+        busy = prepare(self.repo, "busy", "main")
+        (busy / "task.txt").write_text("unsaved\n")
+        self.cmd("jj", "status", cwd=busy)
+        self.cmd("jj", "describe", "-m", "owned task\n\nAgent-Session: owner-1", cwd=busy)
+        self.cmd("jj", "new", "main", cwd=busy)
+        before = operation(self.repo)
+        rows = {row["name"]: row for row in survey(self.repo, idle_hours=0)}
+        self.assertEqual(before, operation(self.repo))
+        self.assertEqual(rows["default"]["verdict"], "primary")
+        self.assertEqual(rows["done"]["verdict"], "removable", rows["done"])
+        self.assertIn("finish --remove", rows["done"]["next"])
+        self.assertEqual(rows["busy"]["verdict"], "blocked", rows["busy"])
+        self.assertEqual(rows["busy"]["outstanding"][0]["sessions"], ["owner-1"])
+        self.assertTrue(landed.exists() and busy.exists())
 
     def test_observation_failure_is_visible(self):
         # Removing the binary from PATH must not turn failure into "unchanged".

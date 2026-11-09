@@ -203,6 +203,33 @@ def doctor(cwd):
 # Ignored directories every toolchain rebuilds; removal discards them without asking.
 REGENERABLE = {"node_modules", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
                ".next", ".turbo", ".venv", ".eslintcache", ".DS_Store"}
+# A repository names its own rebuildable caches here, one directory or file name per line.
+REGENERABLE_FILE = ".jj-agent-regenerable"
+
+
+def regenerable_names(workspace):
+    path = workspace / REGENERABLE_FILE
+    names = set(REGENERABLE)
+    if not path.is_file():
+        return names
+    for line in path.read_text().splitlines():
+        name = line.split("#", 1)[0].strip()
+        if not name:
+            continue
+        if "/" in name or name in (".", "..", ".jj", ".git"):
+            raise Failure(f"{REGENERABLE_FILE}: invalid name {name!r}; list bare cache names such as .impact")
+        names.add(name)
+    return names
+
+
+KEPT = "::(bookmarks() | remote_bookmarks() | tags())"
+
+
+def task_sessions(workspace, data):
+    """Agent-Session values of the task's own commits, plus the recorded owner."""
+    own = f'change_id("{data["initial_change"]}") | (({data["base"]}..@) ~ {KEPT})'
+    found = {s for row in commit_rows(workspace, own) for s in row["sessions"]}
+    return found | ({data["owner_session"]} if data.get("owner_session") else set())
 
 
 def unaddressed(workspace, data):
@@ -210,11 +237,22 @@ def unaddressed(workspace, data):
         # Descendants of the initial change keep work stacked off @, but once it lands they
         # also hold other workspaces' working copies; what those stand on is theirs.
         initial = f'change_id("{data["initial_change"]}")'
-        owned = f'({data["base"]}..@) | {initial} | ({initial}:: ~ ::(working_copies() ~ @))'
+        direct = f'({data["base"]}..@) | {initial}'
+        stacked = f'({initial}:: ~ ::(working_copies() ~ @)) ~ ({direct})'
+        owned = f'{direct} | {stacked}'
+        # Once a bookmark holds the initial change, other writers build on it too. A stacked
+        # commit that names only other Agent-Sessions is theirs (2026-11-09: landed tasks
+        # could not be removed for other sessions' floating commits). Unsigned ones stay ours.
+        if jj(workspace, "log", "-r", f"{initial} & {KEPT}", "--no-graph", "-T", "commit_id"):
+            mine = task_sessions(workspace, data)
+            foreign = [row["commit"] for row in commit_rows(workspace, f"({stacked}) ~ {KEPT}")
+                       if mine and row["sessions"] and not mine.intersection(row["sessions"])]
+            if foreign:
+                owned = f'({owned}) ~ ({" | ".join(foreign)})'
     elif data.get("forgotten"):
-        owned = f'::{data["head"]} & ~::(bookmarks() | remote_bookmarks() | tags())'
+        owned = f'::{data["head"]} & ~{KEPT}'
     else:
-        owned = "::@ & ~::(bookmarks() | remote_bookmarks() | tags())"
+        owned = f"::@ & ~{KEPT}"
     conflicts = jj(workspace, "log", "-r", f'({owned}) & conflicts()',
                    "--no-graph", "-T", 'commit_id ++ "\n"').splitlines()
     if conflicts:
@@ -224,13 +262,14 @@ def unaddressed(workspace, data):
               "--no-graph", "-T", 'commit_id ++ "\n"').splitlines()
 
 
-def untracked(workspace, revision="@", since=None):
+def untracked(workspace, revision="@", since=None, caches=None):
     """Files on disk that jj does not track, each under its top untracked directory.
 
     Walks the tree itself rather than asking Git, so a non-colocated workspace is checked
     the same way. Rebuildable cache directories are pruned and listed apart, so a directory
     holding only caches is not reported. Names only: no file is opened.
     """
+    caches = regenerable_names(workspace) if caches is None else caches
     tracked = set(jj(workspace, "file", "list", "-r", revision, "-T", 'path ++ "\n"').splitlines())
     tracked_dirs = {str(d) for p in tracked for d in Path(p).parents}
     files, regenerable = [], []
@@ -239,11 +278,11 @@ def untracked(workspace, revision="@", since=None):
         if rel == Path("."):
             subdirs[:] = [d for d in subdirs if d not in (".jj", ".git")]
             names = [n for n in names if n != ".git"]
-        regenerable += [str(rel / d) for d in subdirs if d in REGENERABLE]
-        subdirs[:] = [d for d in subdirs if d not in REGENERABLE]
+        regenerable += [str(rel / d) for d in subdirs if d in caches]
+        subdirs[:] = [d for d in subdirs if d not in caches]
         for name in names:
             path = rel / name
-            if name in REGENERABLE:
+            if name in caches:
                 regenerable.append(str(path))
             elif str(path) not in tracked:
                 files.append(path)
@@ -309,3 +348,85 @@ def finish(cwd, remove=False, discard_paths=()):
         report["removed"] = True
         atomic_json(receipt, {**data, **report})
         return report
+
+
+def open_processes(path):
+    """Commands holding files or a working directory under path (lsof), deduplicated."""
+    # Run from outside the directory, so lsof does not report its own working directory.
+    result = run(["lsof", "-F", "pc", "+D", str(path)], Path("/"), check=False)
+    commands, pid = set(), None
+    for line in result.stdout.splitlines():
+        if line.startswith("p"):
+            pid = int(line[1:])
+        elif line.startswith("c") and pid != os.getpid():
+            commands.add(line[1:])
+    return sorted(commands)
+
+
+def commit_rows(workspace, revset):
+    template = ('commit_id ++ "\\t" ++ description.first_line() ++ "\\t" ++ '
+                'description.lines().filter(|l| l.starts_with("Agent-Session:")).join(" ") ++ "\\n"')
+    rows = []
+    for line in jj(workspace, "log", "-r", revset, "--no-graph", "-T", template).splitlines():
+        commit_id, title, sessions = (line.split("\t") + ["", ""])[:3]
+        rows.append({"commit": commit_id, "title": title,
+                     "sessions": sorted({s.strip() for s in sessions.split("Agent-Session:") if s.strip()})})
+    return rows
+
+
+def survey(cwd, idle_hours=24.0):
+    """Read-only report on every workspace of the repository: what still keeps it.
+
+    Never snapshots, rebases or removes. `removable` means `finish --remove` should succeed
+    and nothing touched the directory within idle_hours; it cannot know that an idle owner
+    session will be resumed, so ask a live owner first.
+    """
+    version_check()
+    here = root(cwd)
+    now = time.time()
+    rows = []
+    for name, path in sorted(workspace_names(here).items()):
+        row = {"name": name, "path": str(path), "reasons": []}
+        rows.append(row)
+        if (path / ".jj" / "repo").is_dir():
+            row["verdict"] = "primary"
+            continue
+        if not path.is_dir():
+            row["verdict"] = "missing"
+            row["reasons"].append(f"directory is gone; run: jj workspace forget {shlex.quote(name)}")
+            continue
+        try:
+            data = record(path)
+            row["owner_session"] = data.get("owner_session")
+            state = path / ".jj/working_copy/tree_state"
+            snapshot = state.stat().st_mtime if state.exists() else None
+            row["last_snapshot"] = (time.strftime("%Y-%m-%d %H:%M", time.localtime(snapshot))
+                                    if snapshot else None)
+            head = data.get("head") or commit(path, "@")
+            outstanding = unaddressed(path, data)
+            if outstanding:
+                row["outstanding"] = commit_rows(path, " | ".join(outstanding))
+                row["reasons"].append("unlanded, unparked commits (land or park them, or ask their owner)")
+            if data.get("initial_change"):
+                row["sessions"] = sorted(task_sessions(path, data))
+            found, _ = untracked(path, head, snapshot)
+            if found:
+                row["unsaved"] = found[:20]
+                row["reasons"].append("files jj has not recorded (untracked, ignored or edited since the "
+                                      "last snapshot); finish --remove would refuse")
+            processes = open_processes(path)
+            if processes:
+                row["open_by"] = processes
+                row["reasons"].append("processes have files open inside")
+            if snapshot and now - snapshot < idle_hours * 3600:
+                row["reasons"].append(f"used within the last {idle_hours:g} h")
+        except Failure as error:
+            row["reasons"].append(str(error))
+        if not row["reasons"]:
+            row["verdict"] = "removable"
+            row["next"] = f"jj-agent -R {shlex.quote(str(path))} finish --remove"
+        elif row.get("open_by") or any(r.startswith("used within") for r in row["reasons"]):
+            row["verdict"] = "active"
+        else:
+            row["verdict"] = "blocked"
+    return rows

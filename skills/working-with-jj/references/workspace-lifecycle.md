@@ -50,15 +50,28 @@ jj-agent finish --remove
 From another directory: `jj-agent -R <workspace> finish --remove`. It works for every secondary
 workspace: one made by `prepare` (its own work is what lies under `@` after its base, plus its
 initial change and what stacks on it, except what another workspace's working copy stands on, so a
-checkout that followed `main` onto the landed task does not block it), one made with raw
+checkout that followed `main` onto the landed task does not block it; once a bookmark holds the
+initial change, a stacked commit whose `Agent-Session:` trailers name only other sessions is that
+session's, not this task's, while unsigned ones still count), one made with raw
 `jj workspace add` (adopted: its own work is
 everything under `@` that no bookmark keeps), and a directory jj already forgot (judged by its
 last snapshot; files changed after it count as unsaved). It refuses only unaddressed work,
 conflicts, or untracked/ignored files that would be lost, and then prints the exact command with
 `--discard-path` for what it listed; move anything worth keeping out first and never discard
 credentials by default. Rebuildable caches (`node_modules`, `__pycache__`, `.venv`, `.next`, …)
-are discarded and reported. The primary checkout is never removed. The recovery receipt lives
+are discarded and reported; a repository adds its own cache names, one per line, in a tracked
+`.jj-agent-regenerable` file at its root (bare names, no paths). The primary checkout is never removed. The recovery receipt lives
 outside the removed directory under `~/.local/state/jj-agent/finished/`.
+
+Whoever lands or integrates another workspace's parked work (a coordinator landing a delegate's
+change, or a copy of it) finishes that workspace too once its work is in: the worker has already
+reported and will not come back to it.
+
+`jj-agent -R <repo> survey [--idle-hours 24]` reports every workspace of the repository without
+changing anything: `removable` (with the exact `finish --remove` command), `blocked` (unlanded
+commits with their `Agent-Session:` owners, or files jj has not recorded) or `active` (open files
+or used recently). It cannot know whether an idle owner session will be resumed; ask a live owner
+before removing its workspace.
 
 Never `rm -rf` a workspace root: jj keeps a stale record and unlanded work is lost silently.
 The selected profile's PreToolUse hook redirects such a command to `finish --remove`.
