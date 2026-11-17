@@ -45,3 +45,50 @@ temporary repositories only.
 
 Not verified: live Codex/Claude hook dispatch on the new binary, Git signing and pushes to a real
 remote, Windows.
+
+## Problems found during the rollout, and their fixes
+
+| Problem | Evidence | Fix |
+|---|---|---|
+| `jj land @` right after an edit landed trunk on an empty divergent twin (also on 0.46) | Every read ignored the working copy; the final `bookmark set` snapshotted and revived the stale `@` | Snapshot first; own `@` gets `jj new` before the move; another workspace's `@` refused |
+| A bookmark on a working-copy commit follows every later snapshot | After `jj land @`, a later edit moved `main` | Same change: the landed commit is never left as a working copy |
+| Delete/update trunk conflict seen as one target | `bookmarks(exact:"main")` returns one commit; `jj log -r main` errors | Guard 0 reads the bookmark's `conflict`; own recovery hint |
+| Installer linked only `jj-agent`; `jj-land` was a hand copy from 2026-10-18 on both machines | SHA-256 `90bb7844…` installed vs `b72e5619…` in source | All four public commands link to the release, atomically, with backups in the receipt |
+| `survey` crashed with a traceback on the VM | `lsof +D` per workspace outlived the 120 s subprocess timeout under load; `TimeoutExpired` was not caught | One open-file pass per survey (`/proc` on Linux, one `lsof` on macOS); a timeout or a vanished file is a row reason |
+| Deprecated `git.sign-on-push = true` in two CodeAlive repository configs | 0.47.1 printed a warning on every command there | Replaced with the equivalent `revsets.git-sign-on-push = "~signed() & mine()"` |
+| ARAI's own pre-push hook denies a heredoc that only mentions `jj git push` | Quoted strings are stripped, heredoc bodies are not | Handed to the ARAI coordinator; not in this repository |
+
+With these fixes: hazards 61 passed (5 new in section 13; the previous `jj-land` fails exactly
+those that test it), integration 23 (VM; the two survey tests also on the Mac), installer 5,
+selected hooks 7. A read-only ARAI survey took 33 s on the Mac and 58–117 s per task clone on the
+VM; side by side with `lsof +D`, the one-pass listing found the same processes in 5 of 6 active
+workspaces, the sixth differing by one short-lived `git`.
+
+## Rollout
+
+| | Mac (arm64) | dev-docker-sg (x86_64) |
+|---|---|---|
+| jj | Homebrew `jj 0.47.1` (`brew upgrade jj`, old keg kept) | official musl build at `~/.local/share/jj/releases/0.47.1/jj`; `/usr/local/bin/jj` swapped by `ln -sfn` + `mv -T` |
+| jj-agent release | `cc11ba4cd85c11c7` (first `3da837d86fee5ad2`, before the fixes above) | the same two releases |
+| Public commands | `jj-agent`, `jj-land`, `jj-agent-event`, `jj-agent-reflect` link to the release | same; `/usr/local/bin/jj-land` and `jj-agent` resolve through them |
+| Skills | canonical checkout moved onto `main`; both hosts read it through symlinks | copies in `~/.agents/skills/` replaced from the landed commit |
+| Selected hooks | unchanged: Claude and Codex still run release `b2783b5e4f42fd2c`, which passes on 0.47.1 | none installed |
+
+The hooks were left on their release on purpose: Codex stores a `trusted_hash` per hook, so new
+command paths would switch the JJ hooks off, the ARAI push router included, until the owner
+reviews them in Codex `/hooks`. Move them with
+`bin/jj-agent-install --observational-hooks --codex-push-project /Users/rodio/my-projects/arai`
+only together with that review.
+
+Rollback (no store migration was observed; a read-only survey with 0.46.0 after the upgrade gave
+the same result as 0.47.1):
+
+- Mac: `ln -sf ../Cellar/jj/0.46.0/bin/jj /opt/homebrew/bin/jj` (copy also at
+  `~/.local/share/jj/releases/0.46.0/jj`), then
+  `bin/jj-agent-install --rollback` with the receipts under `~/.local/state/jj-agent/installations/`
+  in reverse order; the hand-copied `jj-land` of 2026-10-18 is in
+  `~/.local/state/jj-agent/manual-backups/20261118T000002/`.
+- VM: `sudo ln -sfn ~/.local/share/jj/releases/0.46.0/jj /usr/local/bin/.jj.new && sudo mv -Tf
+  /usr/local/bin/.jj.new /usr/local/bin/jj`, the receipts the same way; previous skills, `jj-land`
+  and the old link target are in `~/.local/state/jj-agent/manual-backups/20261117T160056/`.
+- The prepare in releases `3da837d8…` and later needs jj 0.47; roll jj-agent back with jj.
