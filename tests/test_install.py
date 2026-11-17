@@ -65,6 +65,30 @@ class InstallTest(unittest.TestCase):
             release = Path(json.loads(result.stdout)["runtime"])
             self.assertFalse((release / "hooks").exists())
 
+    def test_every_public_command_comes_from_the_release_and_rolls_back(self):
+        with tempfile.TemporaryDirectory(prefix="jj-public-install-") as temp:
+            home = Path(temp)
+            bin_dir = home / ".local/bin"
+            bin_dir.mkdir(parents=True)
+            stale = bin_dir / "jj-land"
+            stale.write_text("#!/bin/sh\necho stale standalone copy\n")
+            result = subprocess.run([sys.executable, str(INSTALL), "--target-home", str(home)],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            installed = json.loads(result.stdout)
+            runtime = Path(installed["runtime"])
+            for name in ["jj-agent", "jj-land", "jj-agent-event", "jj-agent-reflect"]:
+                path = bin_dir / name
+                self.assertTrue(path.is_symlink(), name)
+                self.assertEqual(path.resolve(), runtime / "bin" / name)
+            self.assertEqual(list(bin_dir.glob(".*jj-agent-link")), [])
+            rollback = subprocess.run([sys.executable, str(INSTALL), "--target-home", str(home),
+                                       "--rollback", installed["receipt"]], capture_output=True, text=True)
+            self.assertEqual(rollback.returncode, 0, rollback.stderr)
+            self.assertFalse(stale.is_symlink())
+            self.assertIn("stale standalone copy", stale.read_text())
+            self.assertFalse((bin_dir / "jj-agent").exists())
+
     def test_explicit_observation_profile_has_no_stop_and_preserves_switch(self):
         with tempfile.TemporaryDirectory(prefix="jj-selected-install-") as temp:
             home = Path(temp)

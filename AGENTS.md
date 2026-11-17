@@ -12,9 +12,11 @@ workflow authorizes scoped merges; preserve unrelated settings. Never migrate ac
 
 ## 1. Mechanisms
 
-1. Copy `bin/jj-land`, `bin/jj-agent-event`, `bin/jj-agent-reflect` to `~/.local/bin/`
-   (or another directory on PATH — then update the `land` alias path accordingly) and
-   `chmod +x` them.
+1. Run `uv run --no-project --python 3.14 --script bin/jj-agent-install` (add the hook flags of
+   step 2 only when selected). It copies `bin/` and `lib/` into an immutable release and links
+   `jj-agent`, `jj-land`, `jj-agent-event` and `jj-agent-reflect` in `~/.local/bin/` to it,
+   replacing each atomically and backing up what was there; the `land` alias calls
+   `~/.local/bin/jj-land`. Never copy the commands by hand: a copy outlives every later release.
 2. Merge `config/jj-config-snippet.toml` into `~/.config/jj/config.toml`:
    - If the user already has `[git]` or `[aliases]` entries with the same keys, show the
      difference and ask.

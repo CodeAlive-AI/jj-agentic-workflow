@@ -13,6 +13,8 @@ import tomllib
 SOURCE = Path(__file__).resolve().parents[1]
 OLD = {"jj-abandon-guard.py", "jj-world-watch.py", "jj-session-end-check.py",
        "jj-session-briefing.py", "jj-session.py", "jj-worktree.py"}
+# Commands agents and the `land` alias execute from ~/.local/bin.
+PUBLIC = ["jj-agent", "jj-land", "jj-agent-event", "jj-agent-reflect"]
 
 
 def add_selected_hooks(document, runtime, host, project=None, push_project=None):
@@ -197,14 +199,19 @@ def main():
         item["installed"] = digest(path)
         receipt()
     if not args.project_only:
-        path = home / ".local/bin/jj-agent"
-        target = runtime / "bin/jj-agent"
-        if not path.is_symlink() or path.resolve() != target:
-            item = save_before(path)
-            path.unlink(missing_ok=True)
-            path.symlink_to(target)
-            item["installed"] = digest(path)
-            receipt()
+        # Every public command comes from this one release. Repointing only jj-agent left an
+        # older standalone jj-land executing for weeks (2026-11-06 research, 2026-11-17 rollout).
+        for name in PUBLIC:
+            path = home / ".local/bin" / name
+            target = runtime / "bin" / name
+            if not path.is_symlink() or path.resolve() != target:
+                item = save_before(path)
+                temporary = path.with_name(f".{name}.jj-agent-link")
+                temporary.unlink(missing_ok=True)
+                temporary.symlink_to(target)
+                temporary.replace(path)  # Atomic: concurrent agents never see the command missing.
+                item["installed"] = digest(path)
+                receipt()
     receipt()
     print(json.dumps({"runtime": str(runtime), "receipt": str(backup / "receipt.json"),
                       "changed": [r["path"] for r in records],
