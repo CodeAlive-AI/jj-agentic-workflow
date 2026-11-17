@@ -360,6 +360,32 @@ class WorkspacePilot(unittest.TestCase):
         self.assertEqual(rows["busy"]["outstanding"][0]["sessions"], ["owner-1"])
         self.assertTrue(landed.exists() and busy.exists())
 
+    def test_survey_sees_open_processes_and_survives_a_slow_listing(self):
+        held = self.land_task("held")
+        sleeper = subprocess.Popen(["sleep", "60"], cwd=held)
+        try:
+            rows = {row["name"]: row for row in survey(self.repo, idle_hours=0)}
+            self.assertEqual(rows["held"]["verdict"], "active", rows["held"])
+            self.assertIn("sleep", rows["held"]["open_by"])
+            self.assertEqual(jj_agent.open_processes(self.repo / "base.txt"), [])
+        finally:
+            sleeper.kill()
+            sleeper.wait()
+        self.assertEqual({r["name"]: r["verdict"] for r in survey(self.repo, idle_hours=0)}["held"], "removable")
+        # A listing that cannot finish is a reason on every row, never a crash or a false "removable".
+        real = jj_agent.open_files
+
+        def stuck():
+            raise jj_agent.Failure("lsof did not finish within 120 s")
+
+        jj_agent.open_files = stuck
+        try:
+            rows = {row["name"]: row for row in survey(self.repo, idle_hours=0)}
+        finally:
+            jj_agent.open_files = real
+        self.assertEqual(rows["held"]["verdict"], "blocked", rows["held"])
+        self.assertTrue(any("open files could not be listed" in r for r in rows["held"]["reasons"]))
+
     def test_observation_failure_is_visible(self):
         # Removing the binary from PATH must not turn failure into "unchanged".
         child = prepare(self.repo, "failure", "main")

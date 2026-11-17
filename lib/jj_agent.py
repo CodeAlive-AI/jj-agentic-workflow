@@ -17,8 +17,11 @@ class Failure(RuntimeError):
     pass
 
 
-def run(argv, cwd, check=True):
-    result = subprocess.run(argv, cwd=cwd, text=True, capture_output=True, timeout=120)
+def run(argv, cwd, check=True, timeout=120):
+    try:
+        result = subprocess.run(argv, cwd=cwd, text=True, capture_output=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise Failure(f"{Path(argv[0]).name} did not finish within {timeout} s; rerun when the machine is less busy")
     if check and result.returncode:
         raise Failure(result.stderr.strip() or f"Command failed: {argv[0]}")
     return result
@@ -291,8 +294,13 @@ def untracked(workspace, revision="@", since=None, caches=None):
                 regenerable.append(str(path))
             elif str(path) not in tracked:
                 files.append(path)
-            elif since is not None and max((info := (Path(current) / name).lstat()).st_mtime, info.st_ctime) > since:
-                files.append(path)  # Changed after jj's last snapshot of a forgotten workspace.
+            elif since is not None:
+                try:
+                    info = (Path(current) / name).lstat()
+                except FileNotFoundError:
+                    continue  # Deleted while walking: nothing left to lose.
+                if max(info.st_mtime, info.st_ctime) > since:
+                    files.append(path)  # Changed after jj's last snapshot of a forgotten workspace.
     found = set()
     for path in files:
         top = path
@@ -355,17 +363,54 @@ def finish(cwd, remove=False, discard_paths=()):
         return report
 
 
-def open_processes(path):
-    """Commands holding files or a working directory under path (lsof), deduplicated."""
-    # Run from outside the directory, so lsof does not report its own working directory.
-    result = run(["lsof", "-F", "pc", "+D", str(path)], Path("/"), check=False)
-    commands, pid = set(), None
+def open_files():
+    """(command, path) for every file, directory and mapping other processes hold open.
+
+    One pass for the whole machine: `lsof +D <dir>` per workspace stats every file of the
+    tree and on a loaded VM outlived the subprocess timeout (2026-11-17). Linux reads /proc;
+    macOS runs one `lsof` without +D. Processes this user cannot inspect are not listed.
+    """
+    me, held = os.getpid(), []
+    proc = Path("/proc")
+    if (proc / "self" / "fd").is_dir():
+        for entry in proc.iterdir():
+            if not entry.name.isdigit() or int(entry.name) == me:
+                continue
+            try:
+                command = (entry / "comm").read_text().strip()
+                links = [entry / "cwd", entry / "root", entry / "exe", *(entry / "fd").iterdir()]
+            except OSError:
+                continue  # Exited, or another user's process.
+            paths = set()
+            for link in links:
+                try:
+                    paths.add(os.readlink(link))
+                except OSError:
+                    pass
+            try:
+                paths.update(line.split(None, 5)[5] for line in (entry / "maps").read_text().splitlines()
+                             if len(line.split(None, 5)) == 6)
+            except OSError:
+                pass
+            held += [(command, p) for p in paths if p.startswith("/")]
+        return held
+    result = run(["lsof", "-n", "-P", "-w", "-F", "pcn"], Path("/"), check=False)
+    pid = command = None
     for line in result.stdout.splitlines():
         if line.startswith("p"):
-            pid = int(line[1:])
-        elif line.startswith("c") and pid != os.getpid():
-            commands.add(line[1:])
-    return sorted(commands)
+            pid, command = int(line[1:]), None
+        elif line.startswith("c"):
+            command = line[1:]
+        elif line.startswith("n") and pid != me and command:
+            held.append((command, line[1:]))
+    return held
+
+
+def open_processes(path, held=None):
+    """Commands holding files or a working directory under path, deduplicated."""
+    held = open_files() if held is None else held
+    inside = str(Path(path).resolve())
+    return sorted({command for command, p in held if p == inside or p.startswith(inside + os.sep)})
 
 
 def commit_rows(workspace, revset):
@@ -390,6 +435,10 @@ def survey(cwd, idle_hours=24.0):
     here = root(cwd)
     now = time.time()
     rows = []
+    try:
+        held, held_error = open_files(), None
+    except (Failure, OSError) as error:
+        held, held_error = None, f"open files could not be listed ({error}); ask before removing"
     for name, path in sorted(workspace_names(here).items()):
         row = {"name": name, "path": str(path), "reasons": []}
         rows.append(row)
@@ -419,13 +468,16 @@ def survey(cwd, idle_hours=24.0):
                 row["unsaved"] = found[:20]
                 row["reasons"].append("files jj has not recorded (untracked, ignored or edited since the "
                                       "last snapshot); finish --remove would refuse")
-            processes = open_processes(path)
+            if held_error:
+                row["reasons"].append(held_error)
+            processes = open_processes(path, held) if held is not None else []
             if processes:
                 row["open_by"] = processes
                 row["reasons"].append("processes have files open inside")
             if snapshot and now - snapshot < idle_hours * 3600:
                 row["reasons"].append(f"used within the last {idle_hours:g} h")
-        except Failure as error:
+        except (Failure, OSError) as error:
+            # One workspace changing under the survey (agents work meanwhile) is a reason, not a crash.
             row["reasons"].append(str(error))
         if not row["reasons"]:
             row["verdict"] = "removable"
