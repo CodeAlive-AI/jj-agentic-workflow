@@ -5,7 +5,7 @@ description: Use Jujutsu safely in any jj-enabled repository. Use when changing 
 
 # Work with jj
 
-Baseline: **jj 0.46+**, **Git 2.42+** for colocated workspaces. Load
+Baseline: **jj 0.47+**, **Git 2.42+** for colocated workspaces. Load
 `maintaining-vcs-hygiene` and any repository-specific companion alongside this skill.
 
 ## Establish ownership
@@ -31,6 +31,8 @@ Parallel writers need separately assigned roots. Pass the exact root to each del
 `jj` has no `-q` and `jj describe` has no `-F`. Silence output with `>/dev/null`, and give a
 multiline description with `jj describe --stdin < file` or `-m "$(cat file)"`. A failed flag in
 an `&&` chain stops everything after it, a land included, so check the exit status.
+Since 0.47 `timestamp().format()` follows jiff: `%Y-%m-%d %H:%M` works, `%+` and `%v` fail,
+and `%Z` prints an abbreviation (use `%:z` for the offset).
 
 ## Observe without changing state
 
@@ -114,11 +116,14 @@ your own unlanded change, never bookmark-reachable history. Inspect targets expl
 completion/abandon hooks stay retired. Only explicitly selected read-only context hooks may be
 installed; they never claim ownership or block an answer.
 
-JJ 0.46 records workspace metadata and refuses cross-workspace undo/redo. An intentional undo
+JJ records workspace metadata and refuses cross-workspace undo/redo. An intentional undo
 still requires inspecting the operation and confirming exclusive ownership. Never force past
 that refusal. Old operations may lack metadata; two writers in one workspace share an identity.
+Since 0.47 `workspace add` belongs to the caller: `jj undo` there right after `jj-agent prepare`
+takes back the new workspace's initial commit and leaves it stale.
 `jj op restore` remains repository-wide and requires exclusive maintenance. Mutating under
-`--at-op` forks the operation log: use it only for inspection in this workflow.
+`--at-op` forks the operation log: use it only for inspection; `jj-agent prepare` is the one
+tested exception.
 
 If stale, inspect the operation history before `jj workspace update-stale`: it may create a
 recovery commit from disk. Do not integrate or push conflicts. Detailed recovery evidence:

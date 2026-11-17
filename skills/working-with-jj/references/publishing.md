@@ -30,5 +30,9 @@ jj git push --bookmark <bookmark> --remote origin
 jj status
 ```
 
-Verify that the local and remote bookmarks resolve to the same commit. Never push a conflicted
-stack or use raw `git push`.
+Verify that the local and remote bookmarks resolve to the same commit with
+`jj bookmark list <bookmark> --all-remotes`. Since 0.47, in a non-colocated workspace
+`jj git fetch`/`push` no longer update Git's remote-tracking refs, so `git rev-parse origin/<bookmark>`
+there is stale until `jj git export`. `git.sign-on-push` is deprecated in 0.47.1 for
+`revsets.git-sign-on-push`; jj migrates `true` to `~signed() & mine()` with a warning. Never
+push a conflicted stack or use raw `git push`.

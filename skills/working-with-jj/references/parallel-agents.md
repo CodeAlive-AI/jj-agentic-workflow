@@ -2,17 +2,18 @@
 
 Read when more than one agent, session, or workspace writes to the same repository, or when
 diagnosing work that "disappeared". Historical hazards were reproduced on 0.44; the recovery
-guard and workspace lifecycle are retested on 0.46.
+guard and workspace lifecycle are retested on 0.47.1.
 
-## JJ 0.46: workspace-aware undo is a guard, not full isolation
+## Workspace-aware undo is a guard, not full isolation
 
-JJ 0.46 records workspace metadata on new operations and refuses undo/redo when the target
+Since 0.46 JJ records workspace metadata on new operations and refuses undo/redo when the target
 belongs to another workspace. The pilot confirms cross-workspace `jj undo` refuses and preserves
 the other writer. The historical destructive-undo observation below applied to 0.44/0.45.
 
-| Recovery | Result on 0.46 |
+| Recovery | Result on 0.47.1 |
 |---|---|
 | `jj undo` targeting another workspace | Refused; other writer preserved |
+| `jj undo` in the caller right after `jj workspace add` | Undoes the new workspace's initial commit; the child is left stale (0.46 refused) |
 | `jj op restore <old-operation>` | Still rewinds shared repository state |
 | `jj describe` / scoped `jj abandon` | Forward change; other workspace preserved |
 
@@ -22,6 +23,7 @@ An explicit own-workspace undo requires operation inspection and exclusive owner
 force past the workspace guard. Old operations can lack metadata; two agents in one workspace
 share an identity. Neither case proves rewind safe. Keep `op restore` for exclusive maintenance.
 Mutating under `--at-op` forks the operation log; use it only for inspection in this workflow.
+The one tested exception is `jj-agent prepare` (see [workspace-lifecycle.md](workspace-lifecycle.md)).
 
 ## A revision resolves when the command runs, not when you decided on it
 
@@ -83,9 +85,15 @@ jj rebase -s 'roots(bookmarks(exact:"main") & ~::main@origin)' -d main@origin
 jj land <new-tip>
 ```
 
-`jj land` refuses to move a conflicted bookmark and prints this rebase; the world-watch hook
-announces the transition when another writer creates it. Report the divergence to the user rather
-than describing the graph from a listing that only sees one side.
+`jj land` refuses to move a conflicted bookmark and prints this rebase. Report the divergence to
+the user rather than describing the graph from a listing that only sees one side.
+
+A delete/update conflict keeps one live commit: `bookmarks(exact:"main")` returns a single
+commit while the name is still conflicted and `jj log -r main` errors. `jj bookmark list` marks
+it `(conflicted)` and, since 0.47, lists the deleted side as `+ (absent)`. In bookmark
+templates `self.added_targets()`/`self.removed_targets()` are now `List<Option<Commit>>`: test
+each item, `map(|c| if(c, c.commit_id(), "absent"))`. Detect conflicts with `conflict` or the
+listing, never by counting revset targets.
 
 ## A divergent change: converge only what is not landed
 
@@ -136,16 +144,15 @@ loss channel.
 ## Workspace creation needs an owned caller and explicit base
 
 Use `jj-agent prepare` for new assigned workspaces; see [workspace-lifecycle.md](workspace-lifecycle.md).
-JJ 0.46 `workspace add --ignore-working-copy` fails after partial creation. Normal creation
-snapshots the caller. Never invoke it in an active workspace you do not own.
+JJ 0.47 refuses `workspace add --ignore-working-copy`. Plain creation snapshots the caller.
+Never invoke it in an active workspace you do not own.
 
 - Without `-r`, `jj workspace add` starts the new workspace at the *parents* of the creator's `@`.
   An agent that just created its task change and then spawns a workspace gets a base one commit
   behind what it expects.
-- With an ambiguous or conflicted `-r <name>`, the command prints `Revision '<name>' doesn't
-  exist` **and still registers the workspace** on some other base. The retry then fails with
-  `Workspace named '<n>' already exists`, so the agent believes nothing was created. Check
-  `jj workspace list` before retrying, and forget the half-built workspace explicitly.
+- Before 0.47 an unresolvable `-r <name>` still registered a half-built workspace. 0.47 resolves
+  the revision first and creates nothing. A failed creation can still leave a directory or a
+  record behind for other reasons: check `jj workspace list` before retrying.
 - Serialise workspace creation. Concurrent `jj workspace add` from the same workspace is a known
   upstream failure mode, not a supported pattern.
 

@@ -1,14 +1,23 @@
-# Explicit workspace lifecycle (jj 0.46+)
+# Explicit workspace lifecycle (jj 0.47+)
 
 Use this only after a user or launcher assigns a new workspace. Existing active workspaces
 are not migrated, reset, claimed or removed by the installer.
 
 ## Prepare
 
-Preparation defaults to saved JJ state and never snapshots the caller. It explicitly combines
-`workspace add --ignore-working-copy --sparse-patterns full --colocate` with `workspace update-stale`
-in the new metadata-only child. The plain default sparse-copy mode fails partway with ignored
-working-copy updates; no failed mode is retried as a hidden fallback.
+Preparation defaults to saved JJ state and never snapshots the caller. jj 0.47 refuses
+`workspace add --ignore-working-copy`, so the wrapper reads the current operation ID without a
+snapshot, resolves the base there, and runs `jj --at-op=<that full ID> workspace add
+--sparse-patterns full --colocate`. An exact ID loads saved state and leaves the caller's disk
+unread; `--at-op=@` would not, because jj treats `@` as the head and snapshots it. The child is
+materialized directly. If another writer's operation lands in between, jj reconciles the two
+operation heads on the child's next command. This is the workflow's one mutation under `--at-op`;
+it is not permission to mutate at historical operations elsewhere. No failed mode is retried as
+a hidden fallback.
+
+Since 0.47 the creation operations belong to the caller's workspace: `jj undo` in the caller
+right after preparation takes back the child's initial commit and leaves the child stale. To
+discard a prepared workspace, use `jj-agent -R <child> finish --remove`, not undo.
 
 ```sh
 jj-agent prepare task-name -r <full-base-commit-id>
@@ -18,7 +27,8 @@ jj-agent -R /absolute/new/workspace doctor
 Unsaved caller files are excluded. The child materializes the full tree, not inherited sparse
 patterns. For an explicitly owned caller only, `--snapshot-caller` deliberately requests the old
 snapshotting mode. The wrapper resolves one base, serializes its lifecycle calls and verifies the
-child's parent and Git/JJ roots. Partial errors retain evidence; inspect before retrying.
+child's parent, the caller's unchanged working-copy commit and Git/JJ roots. Partial errors
+retain evidence; inspect before retrying.
 
 Default destination: `<caller>/.workspaces/<name>`, ignored before creation. An explicit external
 `--destination` is also supported. The metadata lock does not serialize arbitrary writers.

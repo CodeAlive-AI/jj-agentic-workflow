@@ -2,6 +2,9 @@
 
 Date: 2026-11-06. Status: **research and implementation proposal, not an activated workflow**.
 
+2026-11-17: the preparation blocker below is resolved and jj 0.47.1 is deployed; see
+[VALIDATION-0.47.md](../../VALIDATION-0.47.md). The observation layer and conflict export remain proposals.
+
 The new APIs fit our workflow, but upgrading the executable first would break the current
 `jj-agent prepare`. Qualify its replacement and install the shared tools consistently before
 raising the deployed JJ baseline. The highest-value feature is a shared, operation-pinned

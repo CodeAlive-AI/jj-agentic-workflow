@@ -39,15 +39,16 @@ instead, which is the supervised model.
 
 ## Trade-off: native undo guard does not establish ownership
 
-JJ 0.46 records workspace metadata and refuses cross-workspace undo/redo. We retain forward
+Since 0.46 JJ records workspace metadata and refuses cross-workspace undo/redo. We retain forward
 recovery as the shared-repository default because `op restore`, older operations and two writers
 sharing a workspace remain outside that protection. The hazard suite now expects undo refusal.
 
 ## Trade-off: a shared lifecycle with host adapters
 
 The runtime creates native colocated workspaces, checks root agreement, records ownership, and
-refuses cleanup of unaddressed work or ignored files. Creation explicitly acknowledges a caller
-snapshot: `workspace add --ignore-working-copy` fails partway on 0.46. A filesystem lock serializes
+refuses cleanup of unaddressed work or ignored files. Creation reads saved state only: jj 0.47
+refuses `workspace add --ignore-working-copy`, so it loads the exact operation it just read, the
+workflow's one mutation under `--at-op`; a caller snapshot needs `--snapshot-caller`. A filesystem lock serializes
 our lifecycle calls, not arbitrary writers. Removal therefore still requires exclusive ownership.
 
 ## Retired approach: host hooks

@@ -6,7 +6,7 @@ workflow authorizes scoped merges; preserve unrelated settings. Never migrate ac
 
 ## 0. Preconditions
 
-- `jj --version` ≥ 0.46; Git ≥ 2.42 for colocated workspaces. If jj is absent, ask the user before installing it.
+- `jj --version` ≥ 0.47; Git ≥ 2.42 for colocated workspaces. If jj is absent, ask the user before installing it.
 - Identify the host: Claude Code (`~/.claude/`), Codex (`~/.agents/`), or other. Skills go
   to the host's user-level skills directory; the workflow uses explicit commands in Codex and Claude Code.
 

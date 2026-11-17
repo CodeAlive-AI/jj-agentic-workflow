@@ -11,6 +11,7 @@ import unittest
 
 SOURCE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SOURCE / "lib"))
+import jj_agent
 from jj_agent import Failure, commit, doctor, finish, jj, operation, prepare as raw_prepare, survey
 
 def prepare(*args, **kwargs):
@@ -72,6 +73,36 @@ class WorkspacePilot(unittest.TestCase):
         self.assertEqual(commit(child, "@-"), commit(self.repo, "main"))
         with self.assertRaises(Failure):
             prepare(self.repo, "child", "main")
+
+    def test_prepare_from_exact_operation_survives_a_concurrent_operation(self):
+        # jj 0.47 refuses `workspace add --ignore-working-copy`; prepare loads the exact
+        # operation it read instead. Another writer's operation landing between that read
+        # and the creation forks the operation log; jj must reconcile it without losing either.
+        (self.repo / "unsaved.txt").write_text("caller work\n")
+        old_commit, base = commit(self.repo, "@"), commit(self.repo, "main")
+        real_run = jj_agent.run
+
+        def racing_run(argv, cwd, check=True):
+            if "workspace" in argv and "add" in argv:
+                self.assertTrue(any(a.startswith("--at-op=") and a != "--at-op=@" for a in argv), argv)
+                real_run(["jj", "--ignore-working-copy", "bookmark", "create", "racer", "-r", base], self.repo)
+            return real_run(argv, cwd, check)
+
+        jj_agent.run = racing_run
+        try:
+            child = raw_prepare(self.repo, "raced", "main")
+        finally:
+            jj_agent.run = real_run
+        self.assertEqual(commit(child, "@-"), base)
+        self.assertEqual(commit(self.repo, "@"), old_commit)
+        self.assertEqual(commit(self.repo, "racer"), base)
+        self.assertTrue((child / "base.txt").exists())
+        self.assertFalse((child / "unsaved.txt").exists())
+        # `--at-op=@` fails on several operation heads, so reading one proves they were merged.
+        operation(self.repo)
+        history = jj(self.repo, "op", "log", "--no-graph", "-T", 'description ++ "\\n"')
+        self.assertIn("reconcile divergent operations", history)
+        self.assertEqual(doctor(child)["root"], str(child))
 
     def test_world_watch_observes_shared_store_from_child(self):
         child = prepare(self.repo, "watch", "main")

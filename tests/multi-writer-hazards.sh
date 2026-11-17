@@ -35,6 +35,17 @@ case "$(recov undo "jj undo")" in
   *"real work"*) ok "jj 0.46 cross-workspace undo protects the co-worker" ;;
   *) bad "cross-workspace undo damaged the co-worker; requires jj >= 0.46" ;;
 esac
+# jj 0.47 attributes `workspace add` to the caller, so an undo there takes the new workspace's
+# initial commit back and leaves it stale (0.46 refused). Skill rule: discard it with finish --remove.
+U="$LAB/r1-add-undo"; rm -rf "$U" "$U-c"; mkdir -p "$U"
+( cd "$U"; jj git init --colocate; echo base > base.txt; jj describe -m base
+  jj new -m next; jj bookmark create main -r @- ) >/dev/null 2>&1
+jj -R "$U" workspace add --sparse-patterns full --name c -r main -m "c: task" "$U-c" >/dev/null 2>&1
+( cd "$U"; jj undo ) >/dev/null 2>&1
+case "$(cd "$U-c" && jj status 2>&1)" in
+  *stale*) ok "undo in the caller takes back a new workspace's start (rule is necessary)" ;;
+  *) bad "undo in the caller left the new workspace intact — rule may be obsolete, re-check" ;;
+esac
 for m in "op-restore:jj op restore @OP@"; do
   case "$(recov "${m%%:*}" "${m#*:}")" in
     *"real work"*) bad "${m%%:*} left the co-worker intact — rule may be obsolete, re-check" ;;

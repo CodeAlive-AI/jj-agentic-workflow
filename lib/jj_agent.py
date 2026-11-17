@@ -1,4 +1,4 @@
-"""Shared jj 0.46 workspace lifecycle. Reads never snapshot or merge operations."""
+"""Shared jj 0.47 workspace lifecycle. Reads never snapshot or merge operations."""
 import contextlib
 import fcntl
 import hashlib
@@ -24,8 +24,8 @@ def run(argv, cwd, check=True):
     return result
 
 
-def jj(cwd, *args, mutate=False):
-    flags = [] if mutate else ["--ignore-working-copy", "--at-op=@"]
+def jj(cwd, *args, mutate=False, at="@"):
+    flags = [] if mutate else ["--ignore-working-copy", f"--at-op={at}"]
     result = run(["jj", "--no-pager", *flags, *args], cwd)
     if mutate:
         run(["jj", "--no-pager", "status"], cwd)
@@ -73,7 +73,7 @@ def lifecycle_lock(workspace):
 
 
 def version_check():
-    for command, minimum in [("jj", (0, 46, 0)), ("git", (2, 42, 0))]:
+    for command, minimum in [("jj", (0, 47, 0)), ("git", (2, 42, 0))]:
         text = run([command, "--version"], Path.cwd()).stdout.strip()
         match = re.search(r"(\d+)\.(\d+)\.(\d+)", text)
         if not match or tuple(map(int, match.groups())) < minimum:
@@ -84,8 +84,8 @@ def operation(workspace):
     return jj(workspace, "op", "log", "-n", "1", "--no-graph", "-T", "id")
 
 
-def commit(workspace, expression):
-    ids = jj(workspace, "log", "-r", expression, "--no-graph", "-T", 'commit_id ++ "\n"').splitlines()
+def commit(workspace, expression, at="@"):
+    ids = jj(workspace, "log", "-r", expression, "--no-graph", "-T", 'commit_id ++ "\n"', at=at).splitlines()
     if len(ids) != 1:
         raise Failure(f"Revision must resolve to exactly one commit: {expression}")
     return ids[0]
@@ -165,22 +165,27 @@ def prepare(cwd, name, revision, destination=None, session=None, snapshot_caller
         if ignored.returncode != 0:
             raise Failure("Commit a narrow ignore rule for the workspace directory before preparation")
     with lifecycle_lock(workspace):
-        base = commit(workspace, revision)
+        # One saved-state view: the base and the caller's commit come from the operation
+        # that workspace add then builds on.
+        op = operation(workspace)
+        base = commit(workspace, revision, at=op)
+        caller = commit(workspace, "@", at=op)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        # Explicit full sparsity avoids workspace-add's intermediate sparse-copy
-        # mutation. Creation can then ignore the caller and materialize only the
-        # newly owned child through update-stale. Never retry a failed mode.
-        flags = [] if snapshot_caller else ["--ignore-working-copy"]
+        # jj 0.47 refuses `workspace add --ignore-working-copy`. Loading an exact operation ID
+        # (never `@`, which jj treats as the head and snapshots) leaves the caller's disk
+        # unread and still materializes the new child. If another process wrote an operation
+        # meanwhile, jj reconciles the two heads on the child's next command, as for any
+        # concurrent writer. Full sparsity avoids the sparse-copy step. Never retry a failed mode.
+        flags = [] if snapshot_caller else [f"--at-op={op}"]
         run(["jj", *flags, "workspace", "add", "--sparse-patterns", "full", "--colocate", "--name", name,
                       "-r", base, "-m", f"Task: {name}", str(dest)], workspace)
-        if not snapshot_caller:
-            if any(p.name not in (".jj", ".git") for p in dest.iterdir()):
-                raise Failure(f"New workspace is not metadata-only; keep and inspect {dest}")
-            run(["jj", "workspace", "update-stale"], dest)
         run(["jj", "status"], dest)
         parent = commit(dest, "@-")
         if parent != base:
             raise Failure(f"Unexpected workspace base; keep and inspect {dest}")
+        if not snapshot_caller and commit(workspace, "@") != caller:
+            raise Failure(f"The caller's working-copy commit changed during preparation (another writer "
+                          f"in the caller?); keep {dest}, read `jj op log` in the caller, then decide")
         data = {"name": name, "path": str(dest), "store": str(repo_store(dest)),
                 "base": base, "initial_change": jj(dest, "log", "-r", "@", "--no-graph", "-T", "change_id"),
                 "owner_session": session, "created_at": int(time.time())}

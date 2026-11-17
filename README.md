@@ -53,7 +53,7 @@ cheaply. jj is the best VCS substrate for that — automatic snapshotting, first
 conflicts, cheap workspaces — but several of its properties are actively dangerous in a
 multi-writer repository, and none of them are documented as such:
 
-- `jj op restore` rewinds shared repository state. JJ 0.46 guards `undo`/`redo` across
+- `jj op restore` rewinds shared repository state. JJ guards `undo`/`redo` across
   workspaces, but shared-workspace writers and old operations still require ownership checks.
 - Ordinary reads can mutate state: even `jj status` snapshots the working copy, absorbing
   stray files into the current change.
@@ -97,7 +97,7 @@ Every rule in this workflow traces to one of those measured hazards or to a real
 
 ## Compatibility
 
-Current baseline: **jj 0.46.0**, Git **2.42+**, Python **3.11+** for the installer.
+Current baseline: **jj 0.47.1**, Git **2.42+**, Python **3.11+** for the installer.
 New child workspaces use JJ's native Git colocation. Existing active workspaces stay unchanged.
 See [workspace lifecycle](skills/working-with-jj/references/workspace-lifecycle.md),
 [Codex integration](skills/working-with-jj/references/codex.md), and
@@ -108,7 +108,7 @@ after a Stop hook displaced a substantive answer. The default installer adds no 
 selection may add read-only context and action-specific checks; plugin subscriptions must be
 controlled separately before enabling Codex hooks. See the [selected-hook report](docs/SELECTED-HOOKS-2026-10-16.md).
 
-The [0.46 validation report](docs/VALIDATION-0.46.md) records installed versions, test evidence,
+The [0.47 validation report](docs/VALIDATION-0.47.md) and the earlier [0.46 report](docs/VALIDATION-0.46.md) record installed versions, test evidence,
 host limitations and rollback procedures.
 
 ## Contributing
