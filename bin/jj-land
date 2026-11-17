@@ -11,6 +11,7 @@
 #   * the landing range contains a DIVERGENT change (one change id, several visible
 #     commits — trunk can end up on the twin that does not hold the work);
 #   * <rev> resolves to anything but exactly one revision;
+#   * <rev> is another workspace's working copy (its next snapshot would drag the bookmark along);
 #   * a commit in the range touches a path in the repository's `land.forbidden` fileset;
 #   * the repository's `land.check` command fails on the target (run last, just before the move);
 #   * the trunk bookmark moved while `land.check` ran — unless the repository opted in with
@@ -18,6 +19,8 @@
 #     resulting tree all stay inside that fileset (see Guard 7).
 # After a land it reports every file the range added, per commit (added-then-deleted too),
 # flagging secret- or scratch-shaped names and large files. Filename policy, not secret detection.
+# It records this workspace's working copy before resolving anything, and when <rev> is that
+# working copy it starts a new change on top first (`jj new`), so later edits stay out of trunk.
 # Every check reads before the final bookmark move; concurrent writers can still change
 # the repository in between. This narrows mistakes, it is not an atomic guarantee.
 set -euo pipefail
@@ -34,6 +37,26 @@ done
 
 count_rev() { jj log --ignore-working-copy -r "$1" --no-graph -T 'commit_id ++ "\n"' 2>/dev/null | grep -c . || true; }
 one_rev()   { jj log --ignore-working-copy -r "$1" --no-graph -T 'commit_id' 2>/dev/null | head -1; }
+# A local (or, with $2, remote) bookmark record that is conflicted. Counting revset targets misses
+# a delete/update conflict: one side is absent, so the revset shows a single commit.
+conflicted() {
+    local which='!remote' flags=()
+    [[ -n "${2:-}" ]] && { which="remote == \"$2\""; flags=(--all-remotes); }
+    jj bookmark list --ignore-working-copy ${flags[@]+"${flags[@]}"} -T "if($which && conflict, \"x\")" "exact:$1" \
+        2>/dev/null | grep -q x
+}
+
+# Every read below ignores the working copy, and the final `jj bookmark set` snapshots it. A
+# revision resolved from a stale `@` was then the pre-snapshot commit, revived beside its rewrite:
+# trunk landed on an empty divergent twin (reproduced 2026-11-17 on jj 0.46 and 0.47). Record the
+# working copy once, before anything is resolved.
+if ! snap_err=$(jj util snapshot 2>&1 >/dev/null); then
+    echo "jj land: NOT LANDED — could not record this workspace's working copy first:" >&2
+    printf '%s\n' "$snap_err" | sed 's/^/  /' >&2
+    echo "Fix that, then rerun: jj land ${rev}${bookmark:+ --to $bookmark}" >&2
+    echo "(A stale working copy: read jj op log, then jj workspace update-stale.)" >&2
+    exit 1
+fi
 
 if [[ -z "$bookmark" ]]; then
     for cand in main master trunk; do
@@ -44,15 +67,23 @@ fi
 
 # --- Guard 0: conflicted bookmark ------------------------------------------
 n=$(count_rev "bookmarks(exact:\"$bookmark\")")
-if [[ "$n" -gt 1 ]]; then
+if [[ "$n" -gt 1 ]] || conflicted "$bookmark"; then
     ev land-refused rule=conflicted-bookmark
-    echo "jj land: REFUSED — bookmark '$bookmark' is CONFLICTED; it points at $n revisions:" >&2
-    jj log --ignore-working-copy -r "bookmarks(exact:\"$bookmark\")" --no-graph \
-        -T '"  " ++ commit_id.short() ++ " " ++ description.first_line() ++ "\n"' >&2
-    echo "While conflicted, '$bookmark' is an ambiguous revset: no ancestry claim about it is" >&2
-    echo "meaningful. Reconcile first — rebase the unpublished side onto the published one:" >&2
-    echo "  jj rebase -s 'roots(bookmarks(exact:\"$bookmark\") & ~::${bookmark}@origin)' -d ${bookmark}@origin" >&2
-    echo "  jj land <new-tip>" >&2
+    echo "jj land: REFUSED — bookmark '$bookmark' is CONFLICTED:" >&2
+    jj bookmark list --ignore-working-copy "exact:$bookmark" 2>/dev/null | sed 's/^/  /' >&2
+    echo "While conflicted, '$bookmark' is an ambiguous name: no ancestry claim about it is" >&2
+    echo "meaningful. Reconcile first." >&2
+    if [[ "$n" -gt 1 ]]; then
+        echo "Two live sides: rebase the unpublished side onto the published one:" >&2
+        echo "  jj rebase -s 'roots(bookmarks(exact:\"$bookmark\") & ~::${bookmark}@origin)' -d ${bookmark}@origin" >&2
+        echo "  jj land <new-tip>" >&2
+    else
+        live=$(one_rev "bookmarks(exact:\"$bookmark\")")
+        echo "One side deleted '$bookmark' (listed as absent), the other moved it to ${live:0:12}." >&2
+        echo "A trunk is rarely meant to be deleted: read that commit, and if it is the trunk you expect, keep it:" >&2
+        echo "  jj bookmark set $bookmark -r 'commit_id(\"$live\")'" >&2
+        echo "  jj land <rev>" >&2
+    fi
     exit 1
 fi
 
@@ -66,12 +97,29 @@ if [[ "$n_target" -gt 1 ]]; then
     echo "Read them, then land exactly one: jj land 'commit_id(\"<full id>\")'" >&2
     exit 1
 fi
-if [[ $(count_rev "${bookmark}@origin") -gt 1 ]]; then
+if [[ $(count_rev "${bookmark}@origin") -gt 1 ]] || conflicted "$bookmark" origin; then
     ev land-refused rule=conflicted-remote-bookmark
-    echo "jj land: REFUSED — ${bookmark}@origin is conflicted; fetch and reconcile it first." >&2
+    echo "jj land: REFUSED — ${bookmark}@origin is conflicted; fetch and reconcile it first:" >&2
+    echo "  jj git fetch --remote origin && jj bookmark list $bookmark --all-remotes" >&2
     exit 1
 fi
 target=$(one_rev "$rev"); old=$(one_rev "$bookmark")
+
+# --- A working-copy commit is not a landing target ---------------------------
+# Every snapshot rewrites a working-copy commit and a bookmark on it follows the rewrite, so
+# trunk would keep absorbing edits that no check saw. Your own `@` gets a new change on top
+# just before the move (what `jj commit` does); another workspace's `@` is its owner's to commit.
+own_wc=0; [[ "$target" == "$(one_rev @)" ]] && own_wc=1
+holder=$(jj workspace list --ignore-working-copy -T 'self.target().commit_id() ++ "\t" ++ name ++ "\n"' 2>/dev/null \
+    | awk -F'\t' -v c="$target" -v own="$(jj workspace list --ignore-working-copy -T 'if(self.current_workspace(), name)' 2>/dev/null)" \
+        '$1 == c && $2 != own { print $2; exit }')
+if [[ -n "$holder" ]]; then
+    ev land-refused rule=working-copy-target reason=other-workspace
+    echo "jj land: REFUSED — ${target:0:12} is the working copy of workspace '$holder'; its next snapshot would" >&2
+    echo "drag '$bookmark' along with edits no check saw. Its owner commits it first ('jj new' there), then:" >&2
+    echo "  jj land '$holder@-'" >&2
+    exit 1
+fi
 
 report_hanging() {
     local hanging
@@ -373,6 +421,21 @@ report_additions() {
     return 0
 }
 
+if [[ "$own_wc" -eq 1 ]]; then
+    if ! new_err=$(jj new 2>&1 >/dev/null); then
+        echo "jj land: NOT LANDED — could not start a new change on top of ${target:0:12}:" >&2
+        printf '%s\n' "$new_err" | sed 's/^/  /' >&2
+        exit 1
+    fi
+    # `jj new` records the working copy first: an edit made while landing rewrote the target.
+    if [[ "$(one_rev @-)" != "$target" ]]; then
+        ev land-refused rule=working-copy-target reason=edited-while-landing
+        echo "jj land: NOT LANDED — the working copy changed while landing, so ${target:0:12} is not what was checked;" >&2
+        echo "'$bookmark' did not move. Your edits are in @- with a new change on top. Rerun: jj land" >&2
+        exit 1
+    fi
+    echo "jj land: ${target:0:12} was this workspace's working copy; a new change now sits on top, so later edits stay out of '$bookmark'."
+fi
 jj bookmark set "$bookmark" -r "$target"
 n_landed=$(jj log --ignore-working-copy -r "$old..$target" --no-graph -T '"x"' 2>/dev/null | wc -c | tr -d ' ')
 ev land-succeeded "commits=$n_landed"

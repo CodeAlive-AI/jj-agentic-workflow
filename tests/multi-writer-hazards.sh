@@ -312,5 +312,42 @@ OUT=$( cd "$R"; "$LAND" @- 2>&1 )
 [[ "$OUT" == *REFUSED*"src/app.txt"* ]] && ok "a rename out of a protected path refuses" || bad "rename out of a protected path accepted: $OUT"
 unset JJ_AGENT_STATE
 
+say "13. landing the working copy, and bookmark conflicts a revset cannot see"
+# 2026-11-17: `jj land @` right after an edit, with no jj command in between, resolved the stale
+# pre-snapshot `@`; the final bookmark move then revived it beside its rewrite and trunk landed on
+# the empty divergent twin (jj 0.46 and 0.47).
+R=$(mk land-wc)
+( cd "$R"; jj new main -m "wc work" ) >/dev/null 2>&1
+echo w > "$R/wc.txt"
+OUT=$( cd "$R"; "$LAND" @ 2>&1 )
+FILES=$( cd "$R"; jj --ignore-working-copy file list -r main 2>/dev/null )
+[[ $'\n'"$FILES"$'\n' == *$'\nwc.txt\n'* && -z "$(jj -R "$R" --ignore-working-copy log -r 'divergent()' --no-graph -T commit_id)" ]] \
+  && ok "land @ after an unrecorded edit lands the edit, with no divergent twin" \
+  || bad "land @ after an unrecorded edit: main has '$FILES'; $OUT"
+WC=$(jj -R "$R" --ignore-working-copy log -r @ --no-graph -T commit_id); MAIN1=$(jj -R "$R" --ignore-working-copy log -r main --no-graph -T commit_id)
+[[ "$WC" != "$MAIN1" && "$(jj -R "$R" --ignore-working-copy log -r @- --no-graph -T commit_id)" == "$MAIN1" ]] \
+  && ok "landing @ starts a new change on top, so later edits stay out of trunk" \
+  || bad "trunk was left on the working copy: @=$WC main=$MAIN1"
+echo later > "$R/later.txt"; ( cd "$R"; jj status ) >/dev/null 2>&1
+[[ "$(jj -R "$R" --ignore-working-copy log -r main --no-graph -T commit_id)" == "$MAIN1" ]] \
+  && ok "a later snapshot does not move trunk" || bad "a later snapshot moved trunk"
+jj -R "$R" workspace add --name other -r main -m "other: task" "$R-other" >/dev/null 2>&1
+( cd "$R-other"; echo o > o.txt; jj status ) >/dev/null 2>&1
+OUT=$( cd "$R"; "$LAND" 'other@' 2>&1 )
+[[ "$OUT" == *REFUSED*"working copy of workspace 'other'"* && "$(jj -R "$R" --ignore-working-copy log -r main --no-graph -T commit_id)" == "$MAIN1" ]] \
+  && ok "land refuses another workspace's working copy and names its parent instead" \
+  || bad "another workspace's working copy was landable: $OUT"
+# A delete/update conflict: one side deletes trunk, the other moves it. The revset sees one commit.
+R=$(mk land-delconf)
+( cd "$R"; jj new main -m "moved"; echo m > m.txt; jj status ) >/dev/null 2>&1
+OP=$(jj -R "$R" --ignore-working-copy op log -n1 --no-graph -T id 2>/dev/null)
+( cd "$R"; jj --ignore-working-copy --at-op "$OP" bookmark delete main
+  jj --ignore-working-copy --at-op "$OP" bookmark set main -r @; jj --ignore-working-copy log -r @ ) >/dev/null 2>&1
+N=$(jj -R "$R" --ignore-working-copy log -r 'bookmarks(exact:"main")' --no-graph -T 'commit_id ++ "\n"' 2>/dev/null | grep -c .)
+OUT=$( cd "$R"; "$LAND" @ 2>&1 )
+[[ "$N" -eq 1 && "$OUT" == *REFUSED*CONFLICTED*"jj bookmark set main"* ]] \
+  && ok "a delete/update trunk conflict is refused with its own recovery (revset shows $N commit)" \
+  || bad "delete/update conflict not diagnosed (revset count $N): $OUT"
+
 printf '\n\033[1mtotal: %d passed, %d failed\033[0m\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
